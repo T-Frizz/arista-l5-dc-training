@@ -39,3 +39,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 68 | Event Monitor | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/68%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609512%5D!/4/2/2%5Bevent_monitor%5D) |
 | 70 | Troubleshooting | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/70%5B%3Bvnd.vst.idref%3Dchapter-idm45591786023480%5D!/4/2/2%5Btroubleshooting%5D) |
 | 72 | eAPI | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/72%5B%3Bvnd.vst.idref%3Dchapter-idm45591785781384%5D!/4/2/2%5Beapi%5D) |
+| 74 | Containers | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D) |
