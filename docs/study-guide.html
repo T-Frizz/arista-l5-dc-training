@@ -187,6 +187,7 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
       <ol>
         <li><a href="#exam"><span class="dn">·</span><span>The exam</span><span></span></a></li>
         <li><a href="#plan"><span class="dn">·</span><span>Six-week plan</span><span></span></a></li>
+        <li><a href="#hw"><span class="dn">F</span><span>Hardware foundations</span><span></span></a></li>
         <li class="group">Operations · OP01</li>
         <li><a href="#d1"><span class="dn">D1</span><span>EOS Management</span><span class="pct" data-pct="1"></span></a></li>
         <li><a href="#d2"><span class="dn">D2</span><span>CloudVision Operations</span><span class="pct" data-pct="2"></span></a></li>
@@ -290,12 +291,137 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
   <h2>Six-week plan</h2>
   <p class="note">About 8–10 hours a week. Each week reads the chapters, works the objectives here, then does the matching labs. Repeat a lab until you can do it from a blank config without notes.</p>
   <div class="weeks">
-    <div class="week"><p class="wk">Week 1</p><h3>EOS and L2 foundations</h3><ul><li>D1 all, D4.1</li><li>Warrior ch. 7–11, 17–19</li><li>Labs D1, D4 (L2LS part)</li></ul></div>
+    <div class="week"><p class="wk">Week 1</p><h3>EOS and L2 foundations</h3><ul><li>D1 all, D4.1</li><li>Warrior ch. 5–11, 17–19, and <a href="#hw">F</a></li><li>Labs D1, D4 (L2LS part)</li></ul></div>
     <div class="week"><p class="wk">Week 2</p><h3>Routed underlay</h3><ul><li>D4.2–4.3, D5 all</li><li>Warrior ch. 2, 18, 20</li><li>Lab D5: eBGP underlay, BFD, ECMP</li></ul></div>
     <div class="week"><p class="wk">Week 3</p><h3>VXLAN and EVPN</h3><ul><li>D6 all, then <a href="#walk">R1</a></li><li>Warrior ch. 21</li><li>Lab D6, three times from scratch</li></ul></div>
     <div class="week"><p class="wk">Week 4</p><h3>CloudVision</h3><ul><li>D2 all, D7.1–7.2</li><li>Warrior ch. 13, 15</li><li>Labs D2, D7 (Studios)</li></ul></div>
     <div class="week"><p class="wk">Week 5</p><h3>Operate and fix</h3><ul><li>D3 all, <a href="#tshoot">R2</a></li><li>Warrior ch. 22–29</li><li>Lab D3, break/fix drills</li></ul></div>
     <div class="week"><p class="wk">Week 6</p><h3>As code, then mock exam</h3><ul><li>D7.3 (AVD, ANTA, eAPI)</li><li>Warrior ch. 12, 30–32</li><li>Capstone under a 4-hour timer</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ F HARDWARE ============ -->
+<section class="block" id="hw">
+  <h2>Hardware foundations: fabric speed, oversubscription and the product line</h2>
+  <p class="note">Background for D4/D5 design questions and for reading datasheets in the real world. Not hands-on exam tasks. Based on Arista Warrior ch. 5, "Fabric Speed" (pp.26–27), and ch. 6, "Arista Products" (pp.28, 30–33), with added design math.</p>
+
+  <h3>Fabric speed and nonblocking</h3>
+  <div class="cols">
+    <div class="part"><h4>Know</h4><ul>
+      <li><b>Fabric</b> = the paths that connect every port to every other port. In a fixed (top-of-rack) switch it's inside the ASIC(s); in a chassis there is a fabric on each line card and a master fabric (the "backplane", now usually hot-swap fabric modules at the back) joining the cards. <span class="pg">AW 5 p.26</span></li>
+      <li><b>Nonblocking</b> = every port can send and receive at line rate, all at the same time. Most home and office switches block, and that's fine for them; data center fabrics usually shouldn't. <span class="pg">AW 5 p.26</span></li>
+      <li><b>Count both directions.</b> Ethernet is full duplex, so 10 ports × 10G needs 200G of fabric to be nonblocking. A "100G fabric" on that switch is 2:1 oversubscribed. A common spec-sheet trick is a fabric number equal to the sum of the ports, quoted as if it meant nonblocking. <span class="pg">AW 5 p.26</span></li>
+      <li><b>Each ASIC is a choke point.</b> If several ports share an ASIC (or uplink) slower than their total, those ports are oversubscribed even when the "fabric" figure looks large. Some chassis cards did this on purpose: groups of ports sharing one port's bandwidth, with a "dedicated" mode giving one port full speed. Fine for servers, not for inter-switch links. <span class="pg">AW 5 p.26–27</span></li>
+      <li><b>Cascaded ASICs</b> (small ASICs feeding a bigger one) give connectivity, but aggregate throughput is capped by the middle ASIC, and the design doesn't scale past a box or two. Meshing big ASICs in the middle of a chassis does scale, if the center ASICs can carry the total. <span class="pg">AW 5 p.27</span></li>
+      <li><b>Single ASIC vs many:</b> a 7050S-64 switched 64×10G nonblocking on one Broadcom Trident+ ASIC. A 7500E 48×10G line card used one ASIC per 8 ports (6 per card) with 1.25 Tbps to the fabric per card: still nonblocking, with a tiny extra latency when traffic crosses ASICs, which only matters for things like high-frequency trading. <span class="pg">AW 5 p.27</span></li>
+    </ul></div>
+    <div class="part"><h4>Reading a datasheet</h4><ul>
+      <li><b>Throughput (Tbps):</b> add up port speeds. Check whether the figure counts one direction or both: chip vendors usually quote one direction (a "12.8T" chip is 32×400G), system datasheets often double it ("25.6 Tbps").</li>
+      <li><b>Forwarding rate (pps):</b> line rate at minimum-size frames. A 64-byte frame plus 20 bytes of preamble and gap is 84 bytes = 672 bits, so 10G = 14.88 Mpps and 100G = 148.8 Mpps. Multiply by ports and compare with the datasheet's Bpps; if the Bpps is lower, the box can't do line rate with small packets.</li>
+      <li><b>Buffers:</b> shallow shared on-chip buffers (Trident/Tomahawk class: 7050X, 7060X) suit low-latency leaf and spine roles. Deep buffers with virtual output queues (Jericho class: 7280R, 7500R) absorb incast and speed mismatches and carry internet-scale routes (FlexRoute, AW 20). See AW ch. 3–4.</li>
+      <li><b>Table sizes:</b> MAC, host routes, LPM routes, ACL/TCAM entries. In EVPN fabrics, host-route (/32) scale on leaves is the one that bites.</li>
+    </ul>
+<pre>Full-duplex math
+10 × 10G ports        = 100G each way → 200G fabric
+48 × 25G + 8 × 100G   = 2.0T each way → 4.0T "system"
+32 × 400G (12.8T chip)= 12.8T each way → 25.6T "system"
+
+Small-packet line rate (64-byte frames)
+10G  →  14.88 Mpps per port
+25G  →  37.2  Mpps
+100G → 148.8  Mpps
+400G → 595.2  Mpps</pre></div>
+  </div>
+
+  <h3>Oversubscription in a leaf-spine fabric</h3>
+  <div class="cols">
+    <div class="part"><h4>Ratios and sizing</h4><ul>
+      <li><b>Leaf ratio</b> = server-facing bandwidth ÷ uplink bandwidth. 48×25G (1.2T) with 4×100G up (400G) is 3:1; with 8×100G (800G) it's 1.5:1; 48×10G with 6×40G is 2:1. The switch itself is nonblocking either way: the "oversubscription" is a design choice in how many ports you use for uplinks.</li>
+      <li><b>Typical targets:</b> 3:1 or better for general compute, 1:1 for storage, AI/ML and east-west heavy racks. Lower ratios cost spine ports.</li>
+      <li><b>Spine count = leaf uplinks</b> (one link per spine). It also sets ECMP width: with 4 spines the leaf needs <code>maximum-paths 4</code> (5.2). Losing one of 4 spines removes 25% of fabric bandwidth; one of 2 removes 50%.</li>
+      <li><b>Leaf count ≤ spine port count</b> (one port per leaf per spine). Beyond that, add a super-spine tier or bigger spines.</li>
+      <li><b>MLAG pairs</b> count as two leaves for spine ports but one ASN in the eBGP design (4.1, 5.3).</li>
+      <li>Hashing is per flow, so one big flow can't use more than one link. Equal-size links and good entropy (VXLAN puts an inner-flow hash in the outer UDP source port) keep ECMP even.</li>
+    </ul></div>
+    <div class="part"><h4>Worked example (this guide's lab, scaled up)</h4>
+<pre>Leaf:  48 × 25G down = 1200G
+       4 × 100G up    =  400G   → 3:1
+       8 × 100G up    =  800G   → 1.5:1  (8 spines)
+
+Spines: 4 × 64-port 100G
+  max leaves      = 64
+  ECMP per leaf   = 4  (maximum-paths 4 ecmp 4)
+  spine fails     → 300G left per leaf (−25%)
+
+Check in EOS
+show interfaces status          ! speeds per port
+show ip route 10.255.0.10       ! N next hops = N spines
+show interfaces counters rates  ! uplink balance</pre></div>
+  </div>
+  <div class="part traps"><h4>Spec-sheet and design traps</h4><ul>
+    <li>A fabric number equal to the port total (not double) means 2:1 if the vendor counts both directions. Do the math yourself. <span class="pg">AW 5 p.26</span></li>
+    <li>"Wire-speed" ports that share an ASIC or a slot connection: read the per-module and per-ASIC numbers, not only the system total. <span class="pg">AW 5 p.26–27</span></li>
+    <li>Forwarding rate quoted at large packets only. Ask for 64-byte performance.</li>
+    <li>Higher model number isn't always newer or better: the 7150 did things the 7160 can't. Pick by port density and speed first, then features (ASIC-dependent), then price. <span class="pg">AW 6 p.28</span></li>
+  </ul></div>
+
+  <h3>Reading the Arista product line</h3>
+  <div class="cols">
+    <div class="part"><h4>Model names</h4>
+    <div class="tbl"><table>
+      <thead><tr><th>Part of DCS-7280SR-48C6-M-F</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>DCS</code></td><td>Data Center Switch</td></tr>
+        <tr><td><code>7280</code></td><td>Family (series). The family decides the ASIC, and so the feature set.</td></tr>
+        <tr><td><code>S</code> / <code>Q</code> / <code>T</code></td><td>Port type: SFP, QSFP, BaseT (RJ45 copper). <code>X</code> = 10G (7050TX = 10GBASE-T)</td></tr>
+        <tr><td><code>R</code> (in the family part)</td><td>R-series: deep buffers and large routing tables (FlexRoute)</td></tr>
+        <tr><td><code>48C6</code></td><td>48 ports, plus six 100G (<code>C</code>) ports</td></tr>
+        <tr><td><code>M</code></td><td>Extra memory</td></tr>
+        <tr><td><code>F</code> / <code>R</code> (at the end)</td><td>Airflow: front-to-back / back-to-front</td></tr>
+        <tr><td><code>SSD</code>, <code>CL</code></td><td>Solid-state drive; high-accuracy clock (mostly older 7150s)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">From the book's examples (AW 6 p.28). Check the current datasheet for new families such as the 7800R, 7060X and 7388X.</p></div>
+    <div class="part"><h4>Physical details worth knowing</h4><ul>
+      <li><b>Front = the side with the network ports.</b> <span class="pg">AW 6 p.28</span></li>
+      <li><b>Power:</b> almost all models have redundant, hot-swap supplies and fans (the 7010T and 7020T don't). Cords are C13–C14 for data center PDUs. Higher-wattage supplies (diagonal handle on the 7280R) fit the same slot as older ones but don't work in older models, so check before swapping. <span class="pg">AW 6 p.28–30</span></li>
+      <li><b>Airflow by handle color:</b> red = front-to-back (cold air in at the ports, hot air out at the power side); blue = back-to-front. Match the hot/cold aisle, and never mix colors in one switch. Fixed on 7500s and the 7280CR-48. <span class="pg">AW 6 p.30</span></li>
+      <li><b>USB:</b> a stick mounts as <code>usb1:</code> (<code>/mnt/usb1</code>). FAT/VFAT (FAT32) only; not NTFS or exFAT. Works for large drives and can power small devices. Some models have console, management and USB2 on the back. <span class="pg">AW 6 p.30–31</span></li>
+      <li><b>Rails:</b> tool-less on newer models such as the 7280R; the same rails fit other switches of that form factor. <span class="pg">AW 6 p.31</span></li>
+    </ul></div>
+  </div>
+
+  <div class="cols">
+    <div class="part"><h4>Ethernet speeds and lanes</h4>
+    <div class="tbl"><table>
+      <thead><tr><th>Speed</th><th>Lanes</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>10G</td><td>1 × 10G</td><td>SFP+. The old DC baseline. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>25G</td><td>1 × 25G</td><td>2.5× the speed of 10G on the same fiber. Started by the 25G Ethernet Consortium (Arista among them) before IEEE adopted it. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>40G</td><td>4 × 10G</td><td>QSFP+. Bits are striped round-robin across lanes, so one flow gets 40G; it's not a LAG. Can break out to 4×10G. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>50G</td><td>2 × 25G or 1 × 50G</td><td>50G lanes give 100G (2), 200G (4). <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>100G (old)</td><td>10 × 10G (12-lane CXP)</td><td>Could split to 3×40G or 12×10G. Expensive, hot, new fiber plant. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>100G (new)</td><td>4 × 25G</td><td>QSFP28. Same QSFP cage runs 10/25/40/50/100G, so upgrades reuse 40G cabling. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>400G</td><td>8 × 50G or 4 × 100G</td><td>OSFP or QSFP-DD. 100G-per-lane optics follow the 100G Lambda MSA. <span class="pg">AW 6 p.31</span></td></tr>
+        <tr><td>800G</td><td>8 × 100G</td><td>OSFP. Shipping now; the book (2019) called it "not quite there yet". <span class="pg">AW 6 p.31</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Breakouts show up as sub-ports (<code>Ethernet49/1</code> to <code>/4</code>). The breakout and speed commands vary by platform and release, so check <code>show interfaces status</code> and the platform guide.</p></div>
+    <div class="part"><h4>Features and software</h4><ul>
+      <li><b>Nonblocking:</b> Arista sells nonblocking switches, even the small 7010T. Where you see oversubscription in an Arista design, it's a ratio you chose with uplinks. <span class="pg">AW 6 p.31</span></li>
+      <li><b>FlexRoute</b> (R-series): full internet table in hardware. See 3.4 and AW ch. 20. <span class="pg">AW 6 p.31</span></li>
+      <li><b>AlgoMatch:</b> a replacement for TCAM lookups on some models: faster and with more room for very large or numerous ACLs. Hardware-dependent. <span class="pg">AW 6 p.31</span></li>
+      <li><b>Optics:</b> like other big vendors, Arista switches reject third-party optics by default. That's partly vendor lock and partly protection against bad or mis-coded optics, which cause real TAC cases. SFP+ replaced GBIC and XenPak; QSFP+ and SFP+ both take twinax (DAC) cables for cheap short runs. <span class="pg">AW 6 p.31–32</span></li>
+      <li><b>One EOS image</b> for every platform: no feature sets or release trains, just one binary and a minimum version per model. That's why upgrades are simple (D1.2). <span class="pg">AW 6 p.32</span></li>
+      <li><b>vEOS</b> (lab and router), <b>AnyCloud</b> (now CloudEOS: EOS in AWS/Azure linked to your network with VPN), <b>cEOS</b> (container). See <a href="#containers">R5</a>. <span class="pg">AW 6 p.32</span></li>
+      <li><b>CloudVision:</b> <b>CVP</b> is the GUI platform for config management, change control and telemetry (on-prem cluster or CVaaS; D2). <b>CVX</b> is EOS on a server that switches share state with (a master Sysdb), used for the VXLAN control service (6.1). <span class="pg">AW 6 p.32</span></li>
+    </ul></div>
+  </div>
+
+  <div class="practice"><h3>Practice: hardware</h3>
+    <details class="q"><summary>A 24 × 10G switch advertises a 240 Gbps fabric. Is it nonblocking?</summary><div class="a"><p>Not if 240G is the total for both directions: nonblocking needs 24 × 10G × 2 = 480G. Unless the vendor says 240G is per direction, it's 2:1.</p></div></details>
+    <details class="q"><summary>Leaves have 48 × 25G server ports and 6 × 100G uplinks to 6 spines. What's the oversubscription ratio, and what's the ECMP setting?</summary><div class="a"><p>1200G ÷ 600G = 2:1. Six equal-cost paths, so <code>maximum-paths 6 ecmp 6</code> (or more).</p></div></details>
+    <details class="q"><summary>A new switch arrives with blue-handled fans and PSUs for a rack with front-to-back airflow. Problem?</summary><div class="a"><p>Yes. Blue is back-to-front, so it would breathe hot-aisle air. Order red (front-to-back, <code>-F</code>) units, and never mix colors in one switch.</p></div></details>
   </div>
 </section>
 
@@ -1001,6 +1127,7 @@ interface Vlan10
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li>Every leaf connects to every spine with a routed /31. No STP in the fabric; all uplinks forward through ECMP.</li>
+          <li>Sizing: the number of spines sets each leaf's ECMP width and uplink count; spine port count sets the maximum number of leaves; leaf downlink vs uplink bandwidth is the oversubscription ratio. See <a href="#hw">Hardware foundations</a>. <span class="pg">AW 5 p.26–27</span></li>
           <li>The underlay only needs to carry loopbacks (router IDs and VTEP addresses). Tenant routes live in the overlay.</li>
           <li>Underlay options: <b>eBGP</b> (one protocol everywhere, clear failure domains, RFC 7938), <b>OSPF</b> or <b>IS-IS</b> (simple, then iBGP or eBGP for the overlay).</li>
           <li>Common ASN plan: all spines share one ASN; each leaf (or MLAG pair) gets its own. Spines never peer with each other.</li>
