@@ -7,6 +7,7 @@ and five real-world capstones, all on one containerlab fabric.
 | Folder | What it is |
 |---|---|
 | `topology/l5dc.clab.yml` | containerlab topology: spine1-2, leaf1-4 (two MLAG pairs), host1-2, core1 |
+| `topology/mst-triangle.clab.yml` | three-switch MST triangle (sw1-3, 172.100.101.61-63) for the Lab D4 MST deep dive |
 | `topology/startup/` | Day-0 configs (management, admin/admin, eAPI, gNMI, LLDP). Hosts and core1 are pre-built |
 | `avd/` | AVD inputs for the finished EVPN fabric, `build.py` (pyavd, no Ansible), Ansible playbooks, ANTA inventory |
 | `avd/intended/configs/` | Generated end-state configs. Use them to skip ahead or reset |

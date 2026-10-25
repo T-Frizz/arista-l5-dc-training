@@ -1,0 +1,29 @@
+# Three-switch MST triangle for the Lab D4 "MST deep dive" (AW Ch 17).
+#
+#   sudo containerlab deploy -t mst-triangle.clab.yml
+#   ssh admin@172.100.101.61     (password: admin)
+#
+# Runs next to l5dc.clab.yml (own name and management subnet). About 3 GB RAM.
+#
+#   sw1 Eth1 --- sw2 Eth1        sw1 Eth3 --- sw2 Eth3  (extra link for the BPDU guard task;
+#   sw1 Eth2 --- sw3 Eth1                                  shut it on sw1 until that task)
+#   sw2 Eth2 --- sw3 Eth2
+name: mst
+
+mgmt:
+  network: mst-mgmt
+  ipv4-subnet: 172.100.101.0/24
+
+topology:
+  kinds:
+    ceos:
+      image: ceos:4.34.2F
+  nodes:
+    sw1: {kind: ceos, mgmt-ipv4: 172.100.101.61, startup-config: startup-mst/sw1.cfg}
+    sw2: {kind: ceos, mgmt-ipv4: 172.100.101.62, startup-config: startup-mst/sw2.cfg}
+    sw3: {kind: ceos, mgmt-ipv4: 172.100.101.63, startup-config: startup-mst/sw3.cfg}
+  links:
+    - endpoints: ["sw1:eth1", "sw2:eth1"]
+    - endpoints: ["sw1:eth2", "sw3:eth1"]
+    - endpoints: ["sw2:eth2", "sw3:eth2"]
+    - endpoints: ["sw1:eth3", "sw2:eth3"]

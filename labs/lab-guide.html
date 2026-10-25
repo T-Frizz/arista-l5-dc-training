@@ -3470,6 +3470,116 @@ Address         Age (sec)  Hardware Addr   Interface
     </div>
   </section>
 
+  <section class="part" id="lab-d4-mst">
+    <h3>MST deep dive: regions, instances and the pruning trap</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/46%5B%3Bvnd.vst.idref%3Dchapter-idm45591788964376%5D!/4/2/2%5Bmultiple_spanning_tree_protocol%5D" target="_blank" rel="noopener">AW Ch 17 · Multiple Spanning Tree Protocol</a> (pp. 79-87). In the L2LS, MLAG hides almost every loop, so MST has little to do and is hard to see. This part uses a separate three-switch triangle, like the book's, where MST really has to block a port. It runs next to the main lab: <code>sudo containerlab deploy -t labs/topology/mst-triangle.clab.yml</code> (sw1 to sw3 at 172.100.101.61 to .63, admin/admin). On EVE-NG, build the same triangle with three vEOS nodes and paste <code>labs/topology/startup-mst/sw*.cfg</code>.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> EOS defaults to MST (<code>spanning-tree mode mstp</code>; the other modes are <code>rstp</code>, <code>rapid-pvst</code>, <code>backup</code> and <code>none</code>, p. 79). MST is built on RSTP, so it converges fast, but instead of one tree per VLAN it runs one tree per <em>instance</em>, a group of VLANs (p. 79). Instance 0 (MST0) always exists, runs on every port, and holds every VLAN that is not mapped elsewhere (p. 80). The global <code>spanning-tree root primary</code> and <code>spanning-tree priority</code> commands only affect MST0; other instances use <code>spanning-tree mst N root primary</code> or <code>spanning-tree mst N priority</code> (pp. 80, 84). Two switches are in the same <em>region</em> only if the configuration name, revision and VLAN-to-instance map all match; otherwise the ports between them become <code>P2p Boundary</code> and only MST0 crosses them (pp. 84, 86). Changes in <code>spanning-tree mst configuration</code> take effect when you leave the mode (p. 83). Arista sends MST BPDUs only untagged on the native VLAN, as the standard says; some other vendors send them on every VLAN, so a PVST switch next to an Arista MST switch sees the MST root only on VLAN 1 (pp. 80-81).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Term</th><th>Meaning (p. 86)</th></tr></thead>
+      <tbody>
+        <tr><td>Instance, MSTI</td><td>A group of VLANs sharing one spanning tree. MSTI means any instance other than 0. The book gives instance numbers 1 to 4096 and up to 16 instances per switch; check <code>spanning-tree mst ?</code> on your release.</td></tr>
+        <tr><td>Region</td><td>Switches with the same name, revision and instance map. Inside, each instance has its own topology.</td></tr>
+        <tr><td>IST</td><td>The internal spanning tree: instance 0 inside one region.</td></tr>
+        <tr><td>CST</td><td>The common spanning tree that connects regions (and non-MST switches) to each other. Each region looks like one big switch to it.</td></tr>
+        <tr><td>CIST</td><td>IST plus CST: the single MST0 tree across the whole network.</td></tr>
+        <tr><td>Boundary port</td><td>A port facing another region, or a switch running another STP mode (shown as <code>P2p Boundary</code>).</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p>Deploy the triangle. With defaults, find the MST0 root on each switch, the root port on the other two, and the one port that is discarding. Explain why that port, using bridge IDs.</p></li>
+      <li><p>Make sw3 the MST0 root with <code>spanning-tree root primary</code>, check its priority, then set it to 4096 with <code>spanning-tree priority</code>. Which port blocks now? Check that sw2 can ping sw3 on 10.3.0.3 (VLAN 300) and 10.1.0.3 (VLAN 100).</p></li>
+      <li><p>On sw1 only, create instance 1 with VLAN 100 and instance 2 with VLANs 200 and 300. Read <code>show spanning-tree</code> on all three switches and explain the <code>P2p Boundary</code> ports and who claims to be root for MST1 and MST2.</p></li>
+      <li><p>Put the same instance map on sw2 but also give it the name <code>Switch2</code>. What changes? Then remove the name, give sw3 the same map, and confirm there are no boundary ports anywhere.</p></li>
+      <li><p>Load sharing: make sw1 the root for MST1 and sw2 the root for MST2, keeping sw3 as the MST0 root. Show that each instance blocks a different link.</p></li>
+      <li><p>Interop: change sw2 to <code>rapid-pvst</code>. On sw2, which root does it see for VLAN 1 and for VLAN 100? What do sw1 and sw3 show on their ports to sw2? Change sw2 back to <code>mstp</code>.</p></li>
+      <li><p>BPDU guard: on sw1, make <code>Ethernet3</code> an edge port with BPDU guard and bring it up. Explain what happens, and recover it.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · defaults and moving the MST0 root</summary>
+      <pre class="cli"><code>sw1# show spanning-tree
+sw2# show spanning-tree
+sw3# show spanning-tree
+sw3(config)# spanning-tree root primary
+sw3# show spanning-tree | include Priority
+sw3(config)# spanning-tree priority 4096
+sw1# show spanning-tree
+sw2# show spanning-tree
+sw2# ping 10.3.0.3 repeat 2
+sw2# ping 10.1.0.3 repeat 2</code></pre>
+      <p>With all priorities at 32768, the lowest MAC address wins root. Each other switch has a root port toward it, and on the link between the two non-root switches, the port on the switch with the higher bridge ID is <code>alternate discarding</code> (p. 80). <code>root primary</code> sets 8192 almost at once, and <code>priority 4096</code> sets it explicitly (p. 80); either way the blocked port moves to the sw1-sw2 link, because sw1 and sw2 now both reach sw3 directly. Every port says <code>P2p</code> with no boundary, because all three switches have the same (empty) MST configuration.</p>
+    </details>
+    <details class="solution"><summary>Solution · instances, regions and boundary ports</summary>
+      <pre class="cli"><code>sw1(config)# spanning-tree mst configuration
+sw1(config-mst)# instance 1 vlan 100
+sw1(config-mst)# instance 2 vlan 200,300
+sw1(config-mst)# exit
+sw1# show spanning-tree
+sw1# show spanning-tree mst configuration
+sw3# show spanning-tree
+
+sw2(config)# spanning-tree mst configuration
+sw2(config-mst)# instance 1 vlan 100
+sw2(config-mst)# instance 2 vlan 200,300
+sw2(config-mst)# name Switch2
+sw2(config-mst)# exit
+sw2# show spanning-tree
+
+sw2(config)# spanning-tree mst configuration
+sw2(config-mst)# no name Switch2
+sw2(config-mst)# exit
+sw3(config)# spanning-tree mst configuration
+sw3(config-mst)# instance 1 vlan 100
+sw3(config-mst)# instance 2 vlan 200,300
+sw3(config-mst)# exit
+sw1# show spanning-tree mst 1</code></pre>
+      <p>Once sw1 has a different map, it is its own region. Its ports become <code>P2p Boundary</code>, it is the root of its own MST1 and MST2 (no other switch shares them), and MST0 still elects sw3 across the boundary (pp. 83-84). sw3's port to sw1 is also a boundary port, because the region ends there (p. 84). The book draws this as overlapping circles: MST1 and MST2 exist only on sw1, and MST0 holds two separate regions together (pp. 83-84). Adding the name on sw2 puts sw2 in a third region, so all of its ports are boundary ports even though its instance numbers match sw1's (p. 84). With the same map and no name on all three, every port is plain <code>P2p</code>: one region (p. 85).</p>
+    </details>
+    <details class="solution"><summary>Solution · per-instance roots</summary>
+      <pre class="cli"><code>sw1(config)# spanning-tree mst 1 root primary
+sw2(config)# spanning-tree mst 2 priority 8192
+sw1# show spanning-tree mst 1
+sw2# show spanning-tree mst 2
+sw3# show spanning-tree mst</code></pre>
+      <p>MST0 blocks on the sw1-sw2 link (root sw3), MST1 on the sw2-sw3 link (root sw1), and MST2 on the sw1-sw3 link (root sw2), so every link forwards for some VLANs. The book's author prefers not to split traffic this way in a data center, where MLAG and VARP do the job better (p. 79), but it is the MST equivalent of PVST load sharing and a likely exam task.</p>
+    </details>
+    <details class="solution"><summary>Solution · rapid-pvst next to MST</summary>
+      <pre class="cli"><code>sw2(config)# spanning-tree mode rapid-pvst
+sw2# show spanning-tree
+sw1# show spanning-tree
+sw2(config)# spanning-tree mode mstp</code></pre>
+      <p>sw1 and sw3 show <code>P2p Boundary</code> on their ports to sw2. On sw2, VLAN 1 sees the MST region's root, because Arista MST sends its BPDUs untagged on the native VLAN, which PVST reads as VLAN 1 (pp. 80-81). For VLAN 100, the PVST BPDUs from sw2 pass through the MST switches without being processed, so the PVST switches elect their own roots across the MST region, as if tunneled (p. 81). A Cisco MST switch in the same position behaves differently, which is why replacing a Cisco MST core with Arista can move the root for many VLANs in a PVST network (p. 81). Pin the roots explicitly before any such migration.</p>
+    </details>
+    <details class="solution"><summary>Solution · BPDU guard on an edge port</summary>
+      <pre class="cli"><code>sw1(config)# interface Ethernet3
+sw1(config-if-Et3)# spanning-tree portfast
+sw1(config-if-Et3)# spanning-tree bpduguard enable
+sw1(config-if-Et3)# no shutdown
+sw1# show interfaces status errdisabled
+sw1# show logging last 2 minutes | include BPDU|ERRDISABLE
+! recover: remove the cause first, then bounce the port
+sw1(config)# interface Ethernet3
+sw1(config-if-Et3)# shutdown
+sw1(config-if-Et3)# no spanning-tree bpduguard
+sw1(config-if-Et3)# no spanning-tree portfast</code></pre>
+      <p>sw2 sends BPDUs on its Ethernet3, so the first BPDU error-disables sw1's port. Without BPDU guard, portfast would have forwarded at once on a port that closes a loop. To bring a port back automatically after the cause is gone, use <code>errdisable recovery cause bpduguard</code> with a recovery interval. Leave Ethernet3 shut down when you finish.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> If you see <code>P2p Boundary</code> between two switches that should be in one region, compare <code>show spanning-tree mst configuration</code> on both: name, revision and the full VLAN map, line by line. And remember which commands only touch MST0 (<code>spanning-tree root</code>, <code>spanning-tree priority</code>).</aside>
+    <aside class="note real"><strong>Real world.</strong> Keep MST simple (p. 87). For a small network, one instance (MST1) with every VLAN in one region is fine. Use separate regions on purpose, for example one per building or data center, so a bad link between sites only changes the CST and not every topology inside each site; the book describes three dark-fiber data centers that stopped reconverging once each became its own region (pp. 86-87). Give separate sites different instance numbers too, so that if they are ever connected by mistake they form boundary ports instead of silently joining one region (p. 87). Migrating from PVST to MST also moves STP work off the CPU: one set of BPDUs instead of one per VLAN (p. 80).</aside>
+    <div class="breakfix"><p class="label">Break / fix 1 · region mismatch by VLAN map</p>
+      <p>Start from task 5 (one region, three roots). Inject on sw2: under <code>spanning-tree mst configuration</code>, <code>instance 2 vlan 200</code> after <code>no instance 2</code>, so VLAN 300 falls back to MST0.</p>
+      <p>Symptom: sw2's ports and the ports facing it on sw1 and sw3 show <code>P2p Boundary</code>, sw2 claims to be root for MST1, and the load-sharing layout from task 5 is gone. Pings still work.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>The instance map is part of the region definition, so one VLAN in a different instance makes sw2 its own region (pp. 84, 86). Spot it with <code>show spanning-tree mst configuration</code> on each switch (and <code>show spanning-tree mst configuration digest</code> if your release has it: the digest must match). Fix with <code>instance 2 vlan 200,300</code> on sw2. Never edit the map on one switch at a time in production without expecting a short reconvergence; push the same map to every switch in the region together.</p>
+      </details>
+    </div>
+    <div class="breakfix"><p class="label">Break / fix 2 · the pruning trap</p>
+      <p>Reset to one region with VLANs 100 and 300 both in instance 1 (<code>no instance 2</code>, <code>instance 1 vlan 100,300</code> on all three), sw3 the root of MST1 (<code>spanning-tree mst 1 priority 4096</code> on sw3, and remove the other per-instance priorities). Inject: on sw2 <code>Ethernet2</code> and sw3 <code>Ethernet2</code>, <code>switchport trunk allowed vlan 100</code>.</p>
+      <p>Symptom: <code>sw2# ping 10.3.0.3</code> (VLAN 300) fails, while <code>ping 10.1.0.3</code> (VLAN 100) works. No port is error-disabled, and nothing looks wrong at first glance.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>MST does not care about VLANs, only instances (p. 87). The loop in MST1 is broken on the sw1-sw2 link, so sw2's only forwarding path to sw3 in MST1 is its direct link, which no longer carries VLAN 300. With PVST, VLAN 300 would have had no loop and no blocked port; with MST it shares VLAN 100's topology and is cut off (p. 87). Prove it with <code>show spanning-tree mst 1</code> on sw1 and sw2 (Et2 is the root port on both, and one end of the sw1-sw2 link is alternate discarding) and <code>show interfaces trunk</code> (VLAN 300 not allowed on Et2). Fixes (p. 87): stop pruning VLAN 300 from that link (the simple, correct answer when all switches are in one region), or move VLAN 300 to its own instance and make sure that instance's blocked port lands on a link that does not carry VLAN 300 anyway. MST still runs every instance on every trunk regardless of allowed VLANs, so check where the new instance blocks with <code>show spanning-tree mst 2</code> and steer it with root priority or port cost. Rule: in MST, keep allowed VLAN lists consistent on every link that an instance's tree can use.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="lab-d4-mlag-ts">
     <h3><span class="obj">4.1</span> Troubleshooting MLAG: config-sanity, failover, reload delay, dual-primary and upgrades</h3>
     <p>MLAG faults are the most common Layer 2 problems in an Arista data center, and they rarely look like MLAG faults: they look like intermittent loss for some hosts. This part follows the order you would use on a real pair: consistency, failover behavior, reload delay, split-brain protection, then the upgrade procedure. Page references are to <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/48%5B%3Bvnd.vst.idref%3Dchapter-idm45591788536296%5D!/4/2/2%5Bmlag%5D" target="_blank" rel="noopener">AW Ch 18 · MLAG</a> (written for EOS 4.21; the syntax here is current EOS).</p>
@@ -3883,6 +3993,7 @@ leaf1(config)# no vrf instance LAB</code></pre>
   <section class="part checkpoint">
     <h3>Checkpoint · Lab D4</h3>
     <ul class="checklist">
+      <li>On the MST triangle I can move the MST0 root, build instances with their own roots, explain <code>P2p Boundary</code> ports, and fix a region mismatch and the pruning trap.</li>
       <li>You built and tore down an L2LS with three MLAG domains, MSTP with guards, and VARP gateways, and you can troubleshoot STP and MLAG faults from show output alone.</li>
       <li>The fabric is now routed at the link level: every /31 pings, Loopback0 exists on all six switches, spines run <code>spanning-tree mode none</code>.</li>
       <li>POD_A and POD_B MLAG are Active with VLAN 4093 created for the MLAG iBGP session.</li>
