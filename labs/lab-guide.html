@@ -2027,6 +2027,77 @@ host$ anta nrfu -u admin -p admin --insecure -i anta-inventory.yml \
     <aside class="note real"><strong>Real world.</strong> Intermittent problems on MLAG pairs usually mean the two peers disagree on something (VTEP IP, allowed VLANs, VARP MAC, MTU), because hashing sends some flows to each peer. When "half the traffic" fails, compare the peers line by line: <code>show running-config section</code> on both, or the CloudVision config compare view.</aside>
   </section>
 
+  <section class="part" id="lab-d3-trace">
+    <h3>Logs, CPU and agent tracing</h3>
+    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/70%5B%3Bvnd.vst.idref%3Dchapter-idm45591786023480%5D!/4/2/2%5Btroubleshooting%5D" target="_blank" rel="noopener">AW Ch 29 · Troubleshooting</a> (pp. 156-161) and adds the tools objective 3.4 does not cover yet: following logs live, reading <code>top</code> properly, and tracing an EOS agent, which is how EOS does what other vendors call debugging. It runs on cEOS.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Syslog lives in <code>/var/log/messages</code> (you need <code>sudo</code> to read it), and <code>show logging follow</code> is the CLI version of <code>tail -f</code>. Everything outside <code>flash:</code> is in memory and is lost on reboot; switches with an SSD archive logs to <code>drive:</code> (<code>/mnt/drive</code>) (p. 156). In <code>top</code>, the load average and the <code>%Cpu(s)</code> line matter most, and they are a snapshot, not history. High CPU hurts the control plane (BGP, STP), not forwarding, because the ASIC forwards packets (pp. 156, 158). EOS has only a small <code>debug</code> command; instead you <em>trace agents</em>, not protocols. Trace output goes to a file, never to the console, so it cannot lock up your session (p. 158). Facility names are case-sensitive and must match <code>show trace</code> exactly (p. 159). There is no "undebug all": each trace stays on, and keeps filling its file, until you turn it off agent by agent (p. 160).</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, follow the log live while someone shuts and re-enables spine1 <code>Ethernet1</code>. Then read the same events from <code>/var/log/messages</code> in bash, and list what else is in <code>/var/log</code>.</p></li>
+      <li><p>Take a <code>show processes top once</code> snapshot on leaf1. Start a CPU load for 30 seconds and take another. For both, write down the 1-minute load average and the <code>us</code>, <code>sy</code> and <code>id</code> values, and name the busiest process.</p></li>
+      <li><p>List the agents on leaf1 and find the one that runs BGP. Explain why it is <code>Bgp</code> and not <code>Rib</code> in this fabric.</p></li>
+      <li><p>Trace the BGP agent to <code>flash:bgp-trace.txt</code> at all levels for one facility group. Clear the session to spine1 (10.255.255.0) and watch it come back, first with <code>trace monitor</code>, then with <code>tail -f</code> filtered on the neighbor address.</p></li>
+      <li><p>Turn the trace off completely: stop tracing, remove the file name from the config, delete the file, and prove nothing is left in the running config or on flash.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · logs</summary>
+      <pre class="cli"><code>leaf1# show logging follow
+! shut / no shut spine1 Ethernet1 now, then Ctrl-C
+leaf1# bash sudo tail -n 20 /var/log/messages
+leaf1# bash sudo grep -E "ADJCHANGE|LINEPROTO" /var/log/messages | tail
+leaf1# bash ls /var/log
+leaf1# dir drive:
+! hardware with an SSD only; cEOS has no drive:</code></pre>
+      <p>Without <code>sudo</code>, <code>tail /var/log/messages</code> fails with a permission error (p. 156). <code>/var/log</code> also holds <code>eventMon.db</code> (the event monitor database from the previous drill) and per-agent logs under <code>/var/log/agents</code>, which are worth a look when an agent keeps restarting.</p>
+    </details>
+    <details class="solution"><summary>Solution · reading top</summary>
+      <pre class="cli"><code>leaf1# show processes top once
+leaf1# bash timeout 30 sh -c 'yes &gt; /dev/null &amp; yes &gt; /dev/null &amp; wait' &amp;
+leaf1# show processes top once</code></pre>
+      <pre class="out"><code>top - 13:20:11 up  2:41,  1 user,  load average: 1.62, 0.71, 0.33
+%Cpu(s): 24.1 us,  1.2 sy,  0.0 ni, 74.3 id,  0.0 wa,  0.0 hi,  0.4 si,  0.0 st
+  PID USER  PR NI   VIRT  RES  SHR S %CPU %MEM   TIME+ COMMAND
+ 8811 admin 20  0   2400  740  672 R 99.7  0.0 0:12.40 yes
+ 8812 admin 20  0   2400  740  672 R 99.7  0.0 0:12.38 yes</code></pre>
+      <p>Representative output. The three load averages are 1, 5 and 15 minutes; what is normal depends on the platform, so learn your baseline (p. 156). In the <code>%Cpu(s)</code> line: <code>us</code> is user processes (mostly EOS agents), <code>sy</code> the kernel, <code>ni</code> niced processes, <code>id</code> idle, <code>wa</code> waiting for I/O, <code>hi</code> and <code>si</code> hardware and software interrupts, and <code>st</code> time taken by a hypervisor (pp. 156, 158). The list is sorted by <code>%CPU</code>. On a healthy switch idle is high; if a protocol agent stays near the top for minutes, that is a TAC case. Because cEOS shares the host's CPUs, the percentages here reflect your laptop as much as the switch.</p>
+    </details>
+    <details class="solution"><summary>Solution · tracing the BGP agent</summary>
+      <pre class="cli"><code>leaf1# show agent names | grep -i -E "bgp|rib"
+leaf1# show running-config | include service routing
+! "service routing protocols model multi-agent": BGP runs in its own Bgp agent
+leaf1(config)# debug ip ?
+! only a few topics; tracing is the real tool
+
+leaf1# show trace Bgp | head -40
+! the facility list: copy the exact names, case and colons included
+leaf1(config)# trace Bgp filename flash:bgp-trace.txt
+leaf1(config)# trace Bgp enable &lt;Facility&gt;::* all
+! replace &lt;Facility&gt; with a name from show trace Bgp; check levels with "enable &lt;Facility&gt;::* ?"
+leaf1# show trace Bgp | include 0123456789
+leaf1# clear ip bgp 10.255.255.0
+leaf1(config)# trace monitor Bgp
+! read the session coming up, then Ctrl-C (the CLI is busy until you do)
+leaf1# bash tail -f /mnt/flash/bgp-trace.txt | grep 10.255.255.0
+leaf1# dir flash:bgp-trace.txt</code></pre>
+      <p>The book traces the <code>Rib</code> agent because its switches used the older routing model; with the multi-agent model (which AVD configures and EVPN needs) BGP has its own <code>Bgp</code> agent (pp. 158-159). Facility names differ between releases, which is why you copy them from <code>show trace Bgp</code> rather than from a guide; lower-case or all-caps versions are silently wrong (p. 159). After you enable a facility, <code>show trace</code> lists the active levels (<code>0123456789cf</code> for <code>all</code>). <code>trace monitor</code> cannot be piped to <code>grep</code>, which is why <code>bash tail -f ... | grep</code> is the more useful method (p. 160). Send traces to <code>flash:</code> (or <code>drive:</code>), never to a RAM path such as your home directory, where a large file can hurt the whole system (p. 160).</p>
+    </details>
+    <details class="solution"><summary>Solution · turning it off</summary>
+      <pre class="cli"><code>leaf1(config)# no trace Bgp enable * all
+leaf1(config)# no trace Bgp filename flash:bgp-trace.txt
+leaf1# delete flash:bgp-trace.txt
+leaf1# show running-config | include ^trace
+leaf1# dir flash: | include trace</code></pre>
+      <p>Both checks should print nothing. Copy the file off first (<code>copy flash:bgp-trace.txt scp:...</code>) if TAC wants it (p. 160). A single trace left running for an hour can grow by tens of megabytes, and the book shows a switch with zero bytes free from forgotten traces (p. 160).</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> The exam grades the final device state. A trace or debug you forgot to remove is an unexpected difference in the running config, and on a long exam it can also fill flash. Clean up every diagnostic you add before you move on.</aside>
+    <aside class="note real"><strong>Real world.</strong> Most engineers only trace when TAC asks them to (p. 161), and TAC will tell you the agent, facility and level. Two other things from the chapter are worth knowing. If an SSH login says "Cannot connect to CLI. Entering standalone shell", the CLI could not reach Sysdb, usually because the switch is very busy (for example a <code>configure replace</code> removing a huge config). The standalone CLI sees no interfaces or agents. Don't panic: wait a minute or two and log in again (p. 161). And open a TAC case early with a <code>show tech-support</code> attached; Arista TAC is responsive and has the tools to read it.</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (leaf2): <code>trace Bgp filename flash:old-trace.txt</code> and <code>trace Bgp enable * all</code>, then clear a BGP session a few times.</p>
+      <p>Symptom: <code>dir flash:</code> shows free space shrinking, and a config compare in CloudVision (or a diff against the AVD intended config) shows unexpected lines on leaf2.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>A trace was left running. Find it with <code>show running-config | include ^trace</code>, then <code>no trace Bgp enable * all</code>, <code>no trace Bgp filename flash:old-trace.txt</code> and <code>delete flash:old-trace.txt</code>. Check other agents too; each trace has to be removed on its own.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part checkpoint"><h3>Checkpoint</h3>
     <ul class="checklist">
       <li>I can schedule a command, find its output files, and adjust the tech-support schedule.</li>
@@ -2037,6 +2108,7 @@ host$ anta nrfu -u admin -p admin --insecure -i anta-inventory.yml \
       <li>I can mirror a port to the CPU and capture with tcpdump, and explain LANZ and TAP aggregation.</li>
       <li>I can find a failed event handler action from the log and <code>show event-handler</code>, and back up the config on every write.</li>
       <li>I can enable event monitor, prove a MAC move or route flap with <code>match-mac</code> and <code>match-ip</code>, and keep its history on flash.</li>
+      <li>I can follow the log live, read the <code>%Cpu(s)</code> line in <code>top</code>, trace the Bgp agent to a file, and remove every trace afterwards.</li>
       <li>I can read a VXLAN capture and explain an MTU failure with the 50-byte overhead.</li>
       <li>I follow the troubleshooting method and fixed all three tickets with one change each.</li>
       <li>All injected faults and test configs (event handlers on leaf2, mirror sessions, SNMP test changes) are removed or intended, and <code>show running-config diffs</code> shows only what I mean to keep.</li>
