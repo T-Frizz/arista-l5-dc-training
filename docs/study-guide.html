@@ -1156,10 +1156,12 @@ interface Loopback0
     <div class="body">
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
-          <li>VTEP = the <code>Vxlan1</code> interface, sourced from a loopback. UDP port 4789.</li>
+          <li>VTEP = the <code>Vxlan1</code> interface, sourced from a loopback. UDP port 4789. The VNI is 24 bits (about 16.7 million segments) against 12 bits for a VLAN, so different tenants can reuse a VLAN number on different VNIs. <span class="pg">AW 21 p.110, 113</span></li>
+          <li>VXLAN is stateless encapsulation, not a tunnel that comes "up": a VTEP wraps the frame in UDP/IP and sends it to the remote VTEP's IP. Nothing is up or down until traffic flows. <span class="pg">AW 21 p.112</span></li>
           <li>L2 VNI maps a VLAN to a VNI (bridging). L3 VNI maps a VRF to a VNI (routing between VTEPs in symmetric IRB).</li>
-          <li>BUM (broadcast, unknown unicast, multicast) handling: <b>HER</b> sends a copy to each VTEP in a static flood list. Other options: multicast underlay, CVX (VCS), or EVPN type-3 routes (dynamic HER).</li>
-          <li>MLAG pair = one logical VTEP. Both peers use the same Loopback1 IP; Loopback0 stays unique.</li>
+          <li>BUM (broadcast, unknown unicast, multicast) handling: <b>HER</b> sends a copy to each VTEP in the flood list. The control plane decides how that list is built: manual, CVX, or EVPN type-3 routes. A multicast underlay is the other option, but VXLAN with MLAG and VXLAN routing need HER or EVPN. <span class="pg">AW 21 p.112–114</span></li>
+          <li>Flood lists: a default list (<code>vxlan flood vtep</code>) applies to every mapped VLAN; a per-VLAN list (<code>vxlan vlan 10 flood vtep</code>) overrides it for that VLAN. <span class="pg">AW 21 p.114–115</span></li>
+          <li>MLAG pair = one logical VTEP. Both peers use the same Loopback1 IP and identical VLAN-to-VNI maps and flood lists; Loopback0 stays unique. Add a routed link between the peers so a peer that loses its uplink still reaches the fabric. <span class="pg">AW 21 p.118–119</span></li>
           <li>Data-plane learning: without EVPN, VTEPs learn remote MACs from received frames.</li>
         </ul></div>
         <div class="part"><h4>Configure (leaf1, static HER)</h4>
@@ -1172,7 +1174,11 @@ interface Loopback0
    vxlan vlan 10 vni 10010
    vxlan vlan 20 vni 10020
    vxlan vlan 30 vni 10030
-   vxlan flood vtep 10.255.1.5      <span class="c">! remote pair</span></pre></div>
+   vxlan flood vtep 10.255.1.5      <span class="c">! default list, remote pair</span>
+<span class="c">! add one VTEP without replacing the list:</span>
+   vxlan flood vtep add 10.255.1.7
+<span class="c">! per-VLAN list overrides the default for VLAN 30:</span>
+   vxlan vlan 30 flood vtep 10.255.1.5</pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
@@ -1185,7 +1191,35 @@ interface Loopback0
           <li>Loopback1 not advertised into the underlay: tunnels never form.</li>
           <li>VLAN→VNI mapping differs between VTEPs (10→10010 here, 10→1010 there).</li>
           <li>MLAG peers with different Loopback1 addresses; remote VTEPs see two VTEPs and MACs flap.</li>
+          <li><code>vxlan flood vtep X</code> without <code>add</code> replaces the whole list. <span class="pg">AW 21 p.114</span></li>
+          <li><code>show vxlan vtep</code> is empty until traffic has been exchanged, and entries age out after a few minutes idle. An empty list isn't proof of a fault; check <code>show vxlan flood vtep</code> instead. <span class="pg">AW 21 p.116</span></li>
+          <li><code>vxlan vni notation dotted</code> only changes how VNIs are displayed and entered. 10010 and 0.39.26 are the same value; 0.10.10 is not. <span class="pg">AW 21 p.114</span></li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 21, VXLAN: notes by page</h4><ul>
+          <li><b>p.110</b> Terms: VXLAN segment (an L2 overlay network), VNI (its 24-bit ID), VTEP (the device that encapsulates and decapsulates), VXLAN gateway (a hardware VTEP for devices that can't speak VXLAN), underlay (the routed network) and overlay (the L2 segments on top). Arista's VXLAN is done in hardware, so not every platform or virtual EOS supports the data plane.</li>
+          <li><b>p.112</b> Think of each VTEP as a port on one big switch whose fabric is the L3 network: unknown destinations are flooded to every VTEP in the segment, replies are unicast, and VTEPs learn which MAC sits behind which VTEP, just like a switch's MAC table.</li>
+          <li><b>p.113</b> HER: the ingress VTEP copies each BUM frame to every VTEP in the flood list. A good VNI plan encodes meaning, for example tenant digits plus the VLAN.</li>
+          <li><b>p.114</b> Three ways to run the control plane: manual flood lists, CVX, or a routing protocol (EVPN). Manual config: Vxlan1 source interface on a loopback, VLAN-to-VNI maps, flood lists. The <code>add</code> keyword appends a VTEP; leaving it out overwrites.</li>
+          <li><b>p.115</b> Per-VLAN flood lists take priority over the default list. <code>show vxlan flood vtep</code> marks VLANs that fall back to the default list. EOS adds <code>vxlan udp-port 4789</code> to the config by itself.</li>
+          <li><b>p.116</b> Verify with <code>show vxlan vtep</code> (recently active remote VTEPs only), <code>show vxlan address-table</code> (MAC behind remote VTEP IP), and <code>show vxlan vni</code> (VNI to VLAN, and the source of the mapping).</li>
+          <li><b>p.116–117</b> CVX (CloudVision eXchange, a vEOS instance running <code>service vxlan</code>) learns every VTEP and its VNIs and pushes flood lists to all of them. On each VTEP: <code>management cvx</code> with the server address, and <code>vxlan controller-client</code> on Vxlan1. Check with <code>show vxlan controller status</code> (should say Established), <code>show management cvx</code>, and on CVX <code>show cvx service Vxlan</code> (capital V) and <code>show cvx connections</code>.</li>
+          <li><b>p.117</b> With CVX, MAC-to-VTEP entries are also shared, so a VTEP can know a remote MAC before seeing any traffic from it (type RECEIVED in the address table), which cuts flooding. A VTEP ignores its own address in a flood list. The book leaves EVPN out; for EVPN use 6.2 and the AVD docs.</li>
+          <li><b>p.118–119</b> VXLAN with MLAG: both peers share one Loopback1 address and have identical VXLAN config, so the pair appears as a single VTEP and a single logical switch. A routed link between the peers lets one peer reach the fabric if its uplink fails. If a peer fails, LACP rehashes. If one peer's uplink and the other peer both fail, the pair is cut off, which is why you want more ECMP uplinks.</li>
+        </ul>
+<pre><span class="c">! CVX-based control plane (pre-EVPN, still in EOS)</span>
+cvx                               <span class="c">! on the CVX vEOS</span>
+   no shutdown
+   source-interface Loopback0
+   service vxlan
+      no shutdown
+management cvx                    <span class="c">! on each VTEP</span>
+   no shutdown
+   server host 10.255.0.100
+interface Vxlan1
+   vxlan controller-client</pre>
+        <p class="note">The book's MLAG example peers the two switches with eBGP across a separate VLAN. In this guide's design the pair shares an ASN and uses iBGP on VLAN 4093 (5.3). Both achieve the same thing.</p></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="21"></span><span data-ch="18"></span><a class="chip lab" data-lab="obj-6-1" href="#"><b>LAB</b>D6</a></div>
     </div>
@@ -1311,6 +1345,8 @@ interface Ethernet5
 
   <div class="practice"><h3>Practice: D6</h3>
     <details class="q"><summary>host1 (VLAN 10, leaf1) pings host2 (VLAN 10, leaf3) fine but can't ping 10.20.20.11 (VLAN 20, leaf3). What do you check?</summary><div class="a"><p>Bridging works, routing doesn't, so check the L3 parts: <code>vxlan vrf TENANT-A vni 50001</code> on both, the VRF RD/RTs in BGP, <code>ip virtual-router mac-address</code>, and <code>show ip route vrf TENANT-A</code> on leaf1 for a type-2 host route or type-5 subnet pointing at leaf3's VTEP.</p></div></details>
+    <details class="q"><summary>leaf1's VLAN 10 flood list holds 10.255.1.5. You type "vxlan flood vtep 10.255.1.7". What's in the list now?</summary><div class="a"><p>Only 10.255.1.7. Without <code>add</code> the command replaces the list. Use <code>vxlan flood vtep add 10.255.1.7</code>. (AW ch.21 p.114)</p></div></details>
+    <details class="q"><summary>Right after configuring static HER, show vxlan vtep is empty. Is VXLAN broken?</summary><div class="a"><p>Not necessarily. That command lists VTEPs that have exchanged traffic recently. Send traffic (ping between hosts), then check again, and confirm the configured list with <code>show vxlan flood vtep</code>. (AW ch.21 p.116)</p></div></details>
     <details class="q"><summary>Which EVPN route type tells a VTEP to add another VTEP to its flood list?</summary><div class="a"><p>Type 3, Inclusive Multicast Ethernet Tag (IMET).</p></div></details>
     <details class="q"><summary>Leaves receive EVPN routes but import none of them. The first thing to check?</summary><div class="a"><p>Route targets. Make sure extended communities are sent (<code>send-community</code> or <code>send-community extended</code>) on every hop, and that import RTs match export RTs.</p></div></details>
     <details class="q"><summary>Symmetric or asymmetric IRB for 200 VLANs across 40 leaves where each rack uses 10 VLANs?</summary><div class="a"><p>Symmetric. Each leaf only configures its own 10 VLANs plus the L3 VNI. Asymmetric would need all 200 VLANs and SVIs on every leaf.</p></div></details>
