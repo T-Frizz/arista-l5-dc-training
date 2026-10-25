@@ -717,7 +717,7 @@ watch 2 show interfaces Ethernet1 counters rates</pre></div>
           <li>Work bottom-up: physical (optics, light levels, errors), L2 (LLDP, STP, LACP, MLAG), L3 (routing, ARP), overlay (VXLAN, EVPN). See <a href="#tshoot">R2</a>.</li>
           <li>Optics: DOM readings for Rx/Tx power. Low Rx with CRC errors usually means a dirty fiber or bad optic.</li>
           <li>Software: crashed agents leave logs; <code>show agent logs crash</code>. CPU spikes: <code>show processes top once</code>.</li>
-          <li>Hardware tables: <code>show hardware capacity</code> for TCAM and route/MAC limits.</li>
+          <li>Hardware tables: <code>show hardware capacity</code> for TCAM and route/MAC limits. A route can be in the RIB but not in the ASIC: <code>show ip route</code> warns and marks those with <code>*</code>. <span class="pg">AW 20 p.108</span></li>
           <li><code>show tech-support</code> is what TAC wants; the scheduler keeps hourly copies.</li>
         </ul></div>
         <div class="part"><h4>Commands</h4>
@@ -740,9 +740,26 @@ show version | include memory|uptime</pre></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>An errdisabled port (BPDU guard, link-flap) needs <code>shutdown</code> / <code>no shutdown</code> or errdisable recovery after the cause is fixed.</li>
           <li>Speed/FEC mismatch on 25G/100G links leaves the link down with both sides "notconnect".</li>
+          <li>BGP shows the prefixes received, so it "looks fine", but traffic to some of them drops: they're not programmed in hardware. Count them with <code>show ip route | grep ^* | wc -l</code>. <span class="pg">AW 20 p.108</span></li>
         </ul></div>
       </div>
-      <div class="refs"><span class="lbl">Read</span><span data-ch="29"></span><span data-ch="11"></span><a class="chip lab" data-lab="obj-3-4" href="#"><b>LAB</b>D3</a></div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 20, FlexRoute: notes by page (real-world depth, not an exam objective)</h4><ul>
+          <li><b>p.106</b> FlexRoute lets merchant-silicon switches hold internet-scale routing tables in hardware. It's a hardware feature of the R-series (7280R, 7500R), so you can't try it in vEOS or cEOS.</li>
+          <li><b>p.106</b> The book's lab loads roughly 780,000 BGP routes using eAPI scripts run on the switch itself, against an eAPI listener bound to localhost. Generating and committing that many routes takes hours and keeps ConfigAgent busy. See 7.3 for eAPI.</li>
+          <li><b>p.108</b> Symptom before FlexRoute: BGP has accepted every prefix and memory is fine, but <code>show ip route</code> warns that some routes aren't in hardware and flags them with <code>*</code>. Count them by piping to <code>grep ^*</code> and <code>wc -l</code>.</li>
+          <li><b>p.108–109</b> Turn on the multi-agent routing model first. It can need a reload on some releases and flushes the routing table, so do it before taking a full table.</li>
+          <li><b>p.109</b> Then tell the ASIC how to optimize the FIB: the <code>internet</code> profile for real full tables, or specific prefix lengths when the table is mostly a few lengths. EOS then asks you to restart the layer 3 forwarding agent. That stops L3 forwarding briefly while the ASIC reprograms, so it's a maintenance-window step.</li>
+          <li><b>p.109</b> Afterwards the <code>*</code> routes are gone. <code>show ip route summary</code> gives totals per protocol and per mask length, the quickest way to see the table's shape.</li>
+        </ul>
+<pre>service routing protocols model multi-agent      <span class="c">! may need a reload</span>
+ip hardware fib optimize prefixes profile internet
+<span class="c">! or: ip hardware fib optimize prefix-length 32 24</span>
+agent SandL3Unicast terminate     <span class="c">! 7280R/7500R L3 agent; L3 forwarding pauses</span>
+show ip route | grep ^* | wc -l
+show ip route summary</pre></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="29"></span><span data-ch="11"></span><span data-ch="20"></span><a class="chip lab" data-lab="obj-3-4" href="#"><b>LAB</b>D3</a></div>
     </div>
   </article>
 
@@ -952,7 +969,7 @@ show interfaces Ethernet1 | include MTU</pre></div>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li>Peer on the point-to-point /31s. Advertise Loopback0 and Loopback1 only, through a route map on <code>redistribute connected</code> or with <code>network</code> statements.</li>
-          <li><code>service routing protocols model multi-agent</code> is required for EVPN and is the default on recent EOS. On older EOS it needs a reload.</li>
+          <li><code>service routing protocols model multi-agent</code> is required for EVPN and is the default on recent EOS. On older EOS it needs a reload and clears the routing table, so set it before the switch carries traffic. <span class="pg">AW 20 p.108–109</span></li>
           <li>Peer groups keep config short. <code>no bgp default ipv4-unicast</code> stops sessions activating address families you didn't ask for.</li>
           <li>Spines can use <code>bgp listen range</code> with a <code>peer-filter</code> so new leaves peer without spine changes.</li>
         </ul></div>
@@ -1380,6 +1397,7 @@ EVPN Services
           <li><b>AVD</b> is an Ansible collection (and the Python library PyAVD). <code>eos_designs</code> turns a few YAML files describing the fabric into per-device structured config; <code>eos_cli_config_gen</code> renders EOS config and docs from that; <code>cv_deploy</code> pushes through CloudVision (or <code>eos_config_deploy_eapi</code> direct).</li>
           <li><b>ANTA</b> tests the live network (BGP up, routes present, MLAG healthy). AVD's <code>eos_validate_state</code> generates ANTA tests from the design.</li>
           <li><b>eAPI</b> is JSON-RPC over HTTPS: send CLI commands, get structured JSON back. Everything else (AVD, CloudVision, ANTA) uses it or gNMI.</li>
+          <li>eAPI can also listen only on localhost, so scripts run on the switch itself (from bash) can drive the CLI without exposing the API on the network. The FlexRoute chapter uses this to bulk-load routes. <span class="pg">AW 20 p.106</span></li>
           <li>Inventory groups map to roles: <code>FABRIC</code> &gt; <code>DC1</code> &gt; <code>DC1_SPINES</code>, <code>DC1_L3_LEAVES</code>, plus <code>NETWORK_SERVICES</code> and <code>CONNECTED_ENDPOINTS</code>.</li>
         </ul></div>
         <div class="part"><h4>AVD inputs (DC1.yml, trimmed)</h4>
@@ -1425,6 +1443,7 @@ l3leaf:
 management api http-commands
    protocol https
    no shutdown
+<span class="c"># on-box only: management api http-commands / protocol http localhost</span>
 curl -sk -u admin:admin https://leaf1/command-api -d \
  '{"jsonrpc":"2.0","method":"runCmds","id":1,
    "params":{"version":1,"cmds":["show version"],"format":"json"}}'
