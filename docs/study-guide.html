@@ -1538,6 +1538,12 @@ EVPN Services
           <li><b>ANTA</b> tests the live network (BGP up, routes present, MLAG healthy). AVD's <code>eos_validate_state</code> generates ANTA tests from the design.</li>
           <li><b>eAPI</b> is JSON-RPC over HTTPS: send CLI commands, get structured JSON back. Everything else (AVD, CloudVision, ANTA) uses it or gNMI.</li>
           <li>eAPI can also listen only on localhost, so scripts run on the switch itself (from bash) can drive the CLI without exposing the API on the network. The FlexRoute chapter uses this to bulk-load routes. <span class="pg">AW 20 p.106</span></li>
+          <li>Why eAPI: expect scripts break when a prompt differs, and screen scraping breaks when the output format changes. <code>| json</code> on the CLI and eAPI return named keys instead, so the script doesn't care about layout. <span class="pg">AW 30 p.162–164</span></li>
+          <li><code>runCmds</code> takes a list of commands and returns a list with one dictionary per command, in the same order: <code>result[0]["version"]</code> is the version from the first command. Key names are camelCase and case-sensitive. <span class="pg">AW 30 p.170</span></li>
+          <li>Each request runs at privilege 1 unless the list starts with <code>enable</code>. With an enable secret, send <code>{"cmd": "enable", "input": "&lt;secret&gt;"}</code>. Config is just more list items: <code>configure</code>, <code>interface Ethernet5</code>, <code>description …</code>; config commands return empty dicts. <span class="pg">AW 30 p.171–172</span></li>
+          <li>Nothing interactive: no <code>top</code>, no <code>watch</code>, no "are you sure?" prompts. Use <code>reload now</code>, not <code>reload</code>. <span class="pg">AW 30 p.172</span></li>
+          <li><code>"format": "text"</code> returns the CLI text instead, still one dict per command, under <code>result[i]["output"]</code>. Handy for saving <code>show running-config</code> to a file. <span class="pg">AW 30 p.172</span></li>
+          <li>The <code>/explorer</code> page on the switch builds and sends real requests (so config you send applies), shows the JSON, has a JavaScript script editor and the full command docs. Scripts post to <code>/command-api</code>. <span class="pg">AW 30 p.167–168</span></li>
           <li>Inventory groups map to roles: <code>FABRIC</code> &gt; <code>DC1</code> &gt; <code>DC1_SPINES</code>, <code>DC1_L3_LEAVES</code>, plus <code>NETWORK_SERVICES</code> and <code>CONNECTED_ENDPOINTS</code>.</li>
         </ul></div>
         <div class="part"><h4>AVD inputs (DC1.yml, trimmed)</h4>
@@ -1580,17 +1586,58 @@ l3leaf:
     l2vlans:
       - { id: 30, name: L2-ONLY }</pre>
 <pre><span class="c"># eAPI by hand</span>
+username api privilege 15 secret &lt;pw&gt;   <span class="c">! eAPI needs a user (local or AAA)</span>
 management api http-commands
-   protocol https
+   protocol https            <span class="c">! the default; prefer it over http</span>
    no shutdown
-<span class="c"># on-box only: management api http-commands / protocol http localhost</span>
+   vrf MGMT                  <span class="c">! needed if Management1 is in a VRF</span>
+      no shutdown
+      ip access-group EAPI-ACL
+<span class="c">! on-box only: protocol http localhost (port 8080) or protocol unix-socket</span>
+show management api http-commands       <span class="c">! status, VRFs, URLs, hits per user</span>
 curl -sk -u admin:admin https://leaf1/command-api -d \
  '{"jsonrpc":"2.0","method":"runCmds","id":1,
    "params":{"version":1,"cmds":["show version"],"format":"json"}}'
 
 ansible-playbook playbooks/build.yml      <span class="c"># eos_designs + cli_config_gen</span>
 ansible-playbook playbooks/deploy.yml     <span class="c"># cv_deploy</span>
-anta nrfu -i inventory.yml text            <span class="c"># run tests</span></pre></div>
+anta nrfu -i inventory.yml text            <span class="c"># run tests</span></pre>
+<pre><span class="c"># Python 3 (the book uses Python 2 + jsonrpclib)</span>
+import requests, urllib3
+urllib3.disable_warnings()                 <span class="c"># lab only: self-signed cert</span>
+cmds = [{"cmd": "enable", "input": ""}, "show version"]
+r = requests.post("https://leaf1/command-api", auth=("api", "pw"),
+        verify=False, json={"jsonrpc": "2.0", "method": "runCmds", "id": 1,
+        "params": {"version": 1, "cmds": cmds, "format": "json"}}).json()
+print(r["result"][1]["version"])          <span class="c"># index 1: enable is index 0</span>
+
+<span class="c"># or: pip install pyeapi</span>
+import pyeapi
+node = pyeapi.connect(host="leaf1", username="api", password="pw",
+                      transport="https", return_node=True)
+print(node.enable("show version")[0]["result"]["version"])</pre></div>
+      </div>
+      <div class="part traps"><h4>Exam and real-world traps</h4><ul>
+        <li>Management1 in a VRF but no <code>vrf</code> block under <code>management api http-commands</code>: connections are refused. The <code>vrf</code> block also needs its own <code>no shutdown</code>. <span class="pg">AW 30 p.167</span></li>
+        <li>On the book's release, <code>protocol http</code> was refused while HTTPS was on ("Cannot enable HTTP and HTTPS simultaneously"); run <code>no protocol https</code> first. Check the behavior on your release. <span class="pg">AW 30 p.166–167</span></li>
+        <li>Since 4.21 the switch's self-signed certificate fails Python's TLS check (<code>CERTIFICATE_VERIFY_FAILED</code>). Fixes: install a real cert (best), skip verification (lab only), or run on-box over <code>http localhost</code> or the Unix socket. <span class="pg">AW 30 p.169</span></li>
+        <li>Indexes shift: adding <code>enable</code> at the front makes your show command <code>result[1]</code>.</li>
+        <li><code>reload now</code> over eAPI can return a broken-connection error instead of a reply, because the switch goes down before answering. Catch it. <span class="pg">AW 30 p.171</span></li>
+        <li>A widely known eAPI username and password is a fleet-wide reboot button. Use AAA, strong secrets, a VRF and an ACL. <span class="pg">AW 30 p.171</span></li>
+      </ul></div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 30, eAPI: notes by page (the book's code is Python 2; translated above)</h4><ul>
+          <li><b>p.162</b> The author's argument for learning to script, and his old expect-script lab: every device type needed its own routine to reach a known prompt, and one switch stuck in ROMMON broke the run.</li>
+          <li><b>p.164</b> Screen scraping: pulling the version out of <code>show version</code> by splitting on spaces works until the line format changes, then the index is wrong. <code>show version | json</code> (since about 4.14) gives named fields. Then a short primer on Python scalars, lists and tuples.</li>
+          <li><b>p.166</b> Dictionaries and nesting: you reach a value by key, outer level first (<code>foo["name"]["first"]</code>). Config starts with <code>management api http-commands</code> and <code>no shutdown</code>; HTTPS is the default and the port can be changed.</li>
+          <li><b>p.167</b> Options under the API: your own HTTPS certificate and key, <code>protocol unix-socket</code> (on-box only, no web server, no login), <code>protocol http localhost</code> (port 8080). A username with a password is required for HTTP/HTTPS but not for localhost or the socket; it can be a AAA (RADIUS/TACACS+) user. <code>show management api http-commands</code> shows the servers, ports, VRFs, hit counters per user and the URLs. VRF setup and the per-VRF ACL; eAPI can run in several VRFs at once.</li>
+          <li><b>p.168</b> <code>https://&lt;switch&gt;/explorer</code>: Simple Request (commands, format, timestamps, AutoComplete, ExpandAliases) with request and response viewers, a Script Editor with sample JavaScript, and Command Documentation. Before 4.14 commands couldn't be abbreviated; the AutoComplete option now allows it.</li>
+          <li><b>p.168–169</b> First script: point the client at <code>https://user:pass@127.0.0.1/command-api</code> (or <code>unix:/var/run/command-api.sock</code>, or <code>http://localhost:8080/command-api</code>), call <code>runCmds(1, ["show version"])</code>, print. Files in your home directory on the switch vanish at reboot. The certificate warning and its three workarounds are on p.169.</li>
+          <li><b>p.170</b> Pretty-print the result with <code>pprint</code> or <code>json.dumps(…, indent=3)</code>, then pick fields from <code>response[0]</code>. A loop over 10.0.0.1–10 builds a version and MAC report for a rack of switches in seconds.</li>
+          <li><b>p.171</b> <code>reload now</code> fails as "invalid command" without <code>enable</code> first. A short script that reboots any switch by IP shows why default or shared eAPI credentials are dangerous.</li>
+          <li><b>p.172</b> Commands go as one list; config commands return empty dicts and a warning ("Password input may be echoed") can come back without failing anything. Verify with <code>Cli -p15 -c "show run int e5"</code> from bash. Enable with a secret uses the cmd/input dictionary. <code>"text"</code> format gives CLI output under <code>output</code>.</li>
+          <li><b>p.173</b> CloudVision Portal talks to the switches through eAPI for config push and validation.</li>
+        </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="30"></span><span data-ch="12"></span><span data-ch="31"></span><span data-ch="32"></span><a class="chip" href="https://avd.arista.com/6.4/docs/user-manual/intro-to-ansible-and-avd.html" target="_blank" rel="noopener"><b>AVD</b>Getting started</a><a class="chip" href="https://avd.arista.com/6.4/docs/data-models/index.html" target="_blank" rel="noopener"><b>AVD</b>Data models</a><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/index.html" target="_blank" rel="noopener"><b>AVD</b>Examples</a><a class="chip" href="https://anta.arista.com/" target="_blank" rel="noopener"><b>ANTA</b>Docs</a><a class="chip lab" data-lab="obj-7-3" href="#"><b>LAB</b>D7</a></div>
     </div>
@@ -1598,6 +1645,8 @@ anta nrfu -i inventory.yml text            <span class="c"># run tests</span></p
 
   <div class="practice"><h3>Practice: D7</h3>
     <details class="q"><summary>You need hostname and Loopback0 to differ per device but the BGP template to be shared. How do you lay out configlets?</summary><div class="a"><p>Shared BGP template on the Leaf container; a device configlet (or a configlet builder) per leaf for hostname, router-id, loopbacks and ASN.</p></div></details>
+    <details class="q"><summary>eAPI works from the switch's bash but a remote script gets "connection refused". Management1 is in VRF MGMT. Fix?</summary><div class="a"><p>Add <code>vrf MGMT</code> with <code>no shutdown</code> under <code>management api http-commands</code> (optionally an <code>ip access-group</code>). Check <code>show management api http-commands</code> for the VRF list.</p></div></details>
+    <details class="q"><summary>You send <code>["enable", "show version"]</code>. Where is the version?</summary><div class="a"><p><code>result[1]["version"]</code>. One dict per command in order; <code>enable</code> is <code>result[0]</code> (empty).</p></div></details>
     <details class="q"><summary>In AVD, where do VLAN 10's SVI and VNI come from?</summary><div class="a"><p>The <code>tenants</code> data model in the network-services group vars: the SVI under the VRF, and the VNI computed from <code>mac_vrf_vni_base</code> + VLAN ID (10000 + 10 = 10010) unless set explicitly.</p></div></details>
   </div>
 </section>
