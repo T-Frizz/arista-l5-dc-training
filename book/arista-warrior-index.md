@@ -41,3 +41,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 72 | eAPI | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/72%5B%3Bvnd.vst.idref%3Dchapter-idm45591785781384%5D!/4/2/2%5Beapi%5D) |
 | 74 | Containers | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D) |
 | 76 | vEOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/76%5B%3Bvnd.vst.idref%3Dchapter-idm45591785360776%5D!/4/2/2%5Bveos_idd0052%5D) |
+| 78 | Aristacisms | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/78%5B%3Bvnd.vst.idref%3Dchapter-idm45591784974328%5D!/4/2/2%5Baristacisms%5D) |
