@@ -16,3 +16,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 22 | Fabric Speed | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/22%5B%3Bvnd.vst.idref%3Dchapter-idm45591791040040%5D!/4/2/2%5Bfabric_speed%5D) |
 | 24 | Arista Products | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/24%5B%3Bvnd.vst.idref%3Dchapter-idm45591791039256%5D!/4/2/2%5Barista_products%5D) |
 | 26 | SysDB | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D) |
+| 28 | Introduction to EOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/28%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633624%5D!/4/2/2%5Bintroduction_to_eos%5D) |
