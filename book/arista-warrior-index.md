@@ -36,3 +36,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 62 | tcpdump and Advanced Mirroring | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/62%5B%3Bvnd.vst.idref%3Dchapter-idm45591787081640%5D!/4/2/2%5Btcpdump_and_advanced_mirroring%5D) |
 | 64 | Tap Aggregation | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/64%5B%3Bvnd.vst.idref%3Dchapter-idm45591786736824%5D!/4/2/2%5Btap_aggregation%5D) |
 | 66 | Event Manager | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/66%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609816%5D!/4/2/2%5Bevent_manager%5D) |
+| 68 | Event Monitor | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/68%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609512%5D!/4/2/2%5Bevent_monitor%5D) |
