@@ -770,7 +770,8 @@ show version | include memory|uptime</pre></div>
           <li>Every MLAG member must be a port-channel on each peer, even with one link per peer. The <code>mlag</code> number links them; keep the port-channel numbers the same too, for your own sanity. <span class="pg">AW 18 p.92</span></li>
           <li><code>reload-delay</code> keeps ports errdisabled after a reboot (all but L3 and peer-link ports) until the peer has synced. <code>reload-delay non-mlag</code> lets routed ports come up first so routing settles before MLAGs rehash. <span class="pg">AW 18 p.94</span></li>
           <li>Dual-primary (split brain): a heartbeat to the peer's management IP. If the peer link dies but the heartbeat still answers, the secondary errdisables its ports after the delay. <span class="pg">AW 18 p.94, 96</span></li>
-          <li>VARP: both MLAG peers answer for the same virtual IP and MAC, and both route. VRRP: one master, one backup.</li>
+          <li>VARP: both MLAG peers answer ARP for the same virtual IP with one global virtual MAC, and both route, so traffic is routed on whichever switch receives it and never crosses the peer link. No protocol, no timers, so failover has no lag. <span class="pg">AW 19 p.103–104</span></li>
+          <li>VRRP: one master routes, backups listen; only the master sends advertisements (every 1 s by default). Use it where VARP can't go, such as routed Ethernet ports. <span class="pg">AW 19 p.99, 104</span></li>
           <li>Routed subinterfaces (<code>Ethernet1.100</code>) give one VLAN-tagged L3 link per VRF on a routed port.</li>
         </ul></div>
         <div class="part"><h4>Configure (leaf1)</h4>
@@ -805,14 +806,25 @@ interface Ethernet10
 ip virtual-router mac-address 00:1c:73:00:00:99
 interface Vlan10
    ip address 10.10.10.2/24
-   ip virtual-router address 10.10.10.1</pre></div>
+   ip virtual-router address 10.10.10.1
+
+<span class="c">! VRRP alternative (leaf1 shown; leaf2 same VRID/VIP)</span>
+track UPLINK1 interface Ethernet1 line-protocol
+interface Vlan10
+   ip address 10.10.10.2/24
+   vrrp 10 ipv4 10.10.10.1
+   vrrp 10 priority-level 110
+   vrrp 10 preempt delay minimum 30 reload 60
+   vrrp 10 tracked-object UPLINK1 decrement 20
+   vrrp 10 peer authentication ietf-md5 key-string 0 S3cret</pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
           <li><code>show mlag</code> · <code>show mlag config-sanity</code> · <code>show mlag interfaces</code></li>
           <li><code>show port-channel summary</code> · <code>show lacp neighbor</code></li>
           <li><code>show spanning-tree</code> · <code>show spanning-tree root</code> · <code>show spanning-tree blockedports</code></li>
-          <li><code>show ip virtual-router</code> · <code>show vrrp brief</code></li>
+          <li><code>show ip virtual-router</code> (virtual MAC set, every VIP state active)</li>
+          <li><code>show vrrp brief</code> · <code>show vrrp interface Vlan10</code> · <code>show track brief</code></li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>MLAG config-sanity mismatches (VLANs, trunk lists, STP mode) between peers.</li>
@@ -820,6 +832,9 @@ interface Vlan10
           <li>STP running on VLAN 4094 can block the peer link.</li>
           <li>STP changes made on the <i>secondary</i> are saved but ignored until it becomes primary; config-sanity doesn't check STP priority. Keep STP config identical and compare with <code>show running-config section spanning-tree</code>. <span class="pg">AW 18 p.97–98</span></li>
           <li>VARP needs a real (unique) IP on each SVI plus the shared virtual IP.</li>
+          <li>VARP with no global <code>ip virtual-router mac-address</code>: the VIP config is accepted but nothing answers; <code>show ip virtual-router</code> says the MAC isn't configured. <span class="pg">AW 19 p.104</span></li>
+          <li>VARP on a routed Ethernet port is rejected; it's SVI-only. The VIP is never a traffic source, so don't use it as a routing-protocol or ping source. <span class="pg">AW 19 p.104</span></li>
+          <li>VRRP VIP equal to a physical interface IP isn't allowed in EOS. A new router with equal priority won't take over an existing master. <span class="pg">AW 19 p.101–102</span></li>
         </ul></div>
       </div>
       <div class="book-notes">
@@ -837,6 +852,21 @@ interface Vlan10
           <li><b>p.97–98</b> Only the primary runs STP. A priority change on the secondary does nothing until a failover, then suddenly takes effect. Keep STP running with MLAG; it's the backstop against someone looping a desk switch.</li>
         </ul>
         <p class="note">EOS syntax has changed since the book (4.21). Current EOS uses <code>no spanning-tree vlan-id 4094</code>, and the heartbeat needs a VRF when management is in one: <code>peer-address heartbeat 192.168.0.12 vrf MGMT</code>.</p></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 19, First-Hop Redundancy: notes by page</h4><ul>
+          <li><b>p.99</b> VRRP is the open standard (RFCs 2338, 3768, 5798) and works like HSRP. A virtual router is a VRID (1–255) plus its virtual IPs. The same VRID can be reused on different interfaces, but not the same VRID and VIP pair. <code>show vrrp</code> shows nothing until <code>ip routing</code> is on.</li>
+          <li><b>p.99</b> Defaults: advertisements every 1 s, preemption on, priority 100. The virtual MAC is <code>0000.5e00.01xx</code> where xx is the VRID in hex.</li>
+          <li><b>p.101</b> Preemption can be turned off per group, or delayed: a minimum delay before taking over, and a separate delay after a reload. Advertisement timers can be changed, and <code>default</code> puts each setting back.</li>
+          <li><b>p.101</b> Priority runs 1–254, higher wins. If a master already exists with the same priority, a new router stays backup. Raise priority to make a router master.</li>
+          <li><b>p.102</b> With preemption on, the higher-priority router takes master back as soon as it returns. EOS won't accept a VIP that equals an interface's own IP.</li>
+          <li><b>p.102</b> A group can hold several VIPs: add extras as secondary. Authentication can be clear text (visible in show output) or MD5 (hidden in the running config). Configure the same on every router in the group.</li>
+          <li><b>p.103</b> Tracking: create a track object on an interface's line protocol, then have the VRRP group either decrement its priority or shut down when it goes down. A decrement must drop the master below the backup's priority to cause a failover.</li>
+          <li><b>p.103</b> A VRRP group can be shut down on its own. <code>show vrrp brief</code> is the summary view in busy configs. <code>show track</code> lists objects and what tracks them; spell out <code>brief</code>, because a shortened form is read as an object name.</li>
+          <li><b>p.103–104</b> VARP (L3 anycast gateway): every switch answers ARP and gratuitous ARP for the shared VIP with one virtual MAC. Hosts use whichever reply they get first, so there's no real load balancing, but with MLAG traffic is routed locally on both switches and stays off the peer link.</li>
+          <li><b>p.104</b> VARP setup is two lines: the global virtual-router MAC (same on both switches, and it must have the locally administered bit set; <code>00:1c:73:00:00:99</code> is the usual one), then the VIP under each SVI. It works only on VLAN interfaces. You can ping the VIP. Several VIPs per VLAN are allowed. The VIP is never used as a source address except for gratuitous ARP.</li>
+        </ul>
+        <p class="note">The book shows EOS 4.21 VRRP syntax (<code>vrrp 10 ip</code>, <code>vrrp 10 priority</code>, <code>vrrp 10 track</code>, <code>vrrp 10 authentication</code>, <code>vrrp 10 timers advertise</code>). Current EOS uses <code>vrrp 10 ipv4</code>, <code>priority-level</code>, <code>tracked-object</code>, <code>peer authentication</code> and <code>advertisement interval</code>; many releases still accept the old forms. Check with <code>vrrp 10 ?</code> on your lab's EOS. For EVPN fabrics, <code>ip address virtual</code> (D6.2) is the anycast-gateway form of the same idea.</p></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="17"></span><span data-ch="18"></span><span data-ch="19"></span><span data-ch="11"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/l2ls-fabric/index.html" target="_blank" rel="noopener"><b>AVD</b>L2LS example</a><a class="chip lab" data-lab="obj-4-1" href="#"><b>LAB</b>D4</a></div>
     </div>
@@ -904,6 +934,8 @@ show interfaces Ethernet1 | include MTU</pre></div>
     <details class="q"><summary>leaf1 was MLAG primary, reloaded, and came back. Which is primary now, and are leaf1's host ports up?</summary><div class="a"><p>leaf2 stays primary; MLAG doesn't preempt. leaf1's ports (except routed ports and the peer link) stay errdisabled until reload-delay expires; <code>show mlag detail</code> shows the time left. (AW ch.18 p.94)</p></div></details>
     <details class="q"><summary>You set spanning-tree priority 4096 on leaf2 and nothing changed. Why, and why is that dangerous?</summary><div class="a"><p>leaf2 is MLAG secondary, and only the primary runs STP. The change is saved and takes effect when leaf2 becomes primary, perhaps months later at a failover. config-sanity won't flag it. Put identical STP config on both peers. (AW ch.18 p.97–98)</p></div></details>
     <details class="q"><summary>The peer link fails but both switches are up. What stops both becoming primary and what happens next?</summary><div class="a"><p>Dual-primary detection: the secondary still hears the primary's heartbeat over management, so after the configured delay it errdisables its interfaces. Without a heartbeat, both go primary (split brain). (AW ch.18 p.94, p.96)</p></div></details>
+    <details class="q"><summary>You configured ip virtual-router address 10.10.10.1 on Vlan10 on both leaves, but hosts can't reach their gateway. What's missing?</summary><div class="a"><p>The global <code>ip virtual-router mac-address</code>, the same on both leaves. Without it <code>show ip virtual-router</code> reports the MAC isn't configured and nothing answers ARP for the VIP. (AW ch.19 p.104)</p></div></details>
+    <details class="q"><summary>VRRP master has priority 105, backup 100. You track the master's uplink with decrement 5. The uplink fails. Does the backup take over?</summary><div class="a"><p>No. 105 − 5 = 100 ties with the backup, and an equal priority doesn't displace a working master. Decrement by more than the gap (for example 10). (AW ch.19 p.101, p.103)</p></div></details>
     <details class="q"><summary>A 9000-byte ping between hosts on different leaves fails; 1400 works. What's the likely cause?</summary><div class="a"><p>An underlay link with MTU below 9050. VXLAN adds 50 bytes. Set fabric links to 9214 and re-test with <code>size 8972 df-bit</code>.</p></div></details>
     <details class="q"><summary>Why do spines in an eBGP L3LS usually share one ASN?</summary><div class="a"><p>A route learned from one spine can't be re-advertised by a leaf to another spine and accepted (same ASN in the path), which stops leaf-to-spine-to-leaf-to-spine path hunting, and the config stays uniform.</p></div></details>
   </div>
