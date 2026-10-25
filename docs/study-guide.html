@@ -435,7 +435,9 @@ show interfaces counters rates  ! uplink balance</pre></div>
     <div class="body">
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
-          <li>SysDB is the central state database. Agents (Bgp, Stp, Lag…) publish to it and read from it. <code>show agent</code>, <code>show processes top</code>.</li>
+          <li><b>SysDB</b> is the in-memory database at the center of EOS. Every feature runs as its own Linux process (an <b>agent</b>: Stp, Bgp, Lldp, ConfigAgent…) in protected memory, and agents never talk to each other directly: they publish state to SysDB and subscribe to what they need. <span class="pg">AW 7 p.35</span></li>
+          <li>If an agent crashes, <b>ProcMgr</b> restarts it, it reads its last state back from SysDB, and carries on without reconverging. One bad feature doesn't take the box down, unlike a monolithic OS where one crashed routine crashes everything. <span class="pg">AW 7 p.35–36</span></li>
+          <li>The <b>running-config is a view of SysDB</b>: ConfigAgent writes your CLI changes into SysDB and renders <code>show running-config</code> from it. SysDB lives in RAM and is rebuilt from startup-config at every boot. <span class="pg">AW 7 p.37</span></li>
           <li>EOS is Linux. <code>bash</code> drops you to a shell; <code>FastCli -p 15 -c "cmd"</code> runs CLI from bash.</li>
           <li>Config sessions stage changes, show a diff, and commit atomically. <code>commit timer</code> rolls back unless you confirm.</li>
           <li>Checkpoints save a named copy of the running config; <code>configure replace</code> swaps the whole running config for another file and applies only the differences.</li>
@@ -454,6 +456,7 @@ show interfaces counters rates  ! uplink balance</pre></div>
 
 <span class="k">configure checkpoint save</span> pre-change
 <span class="k">configure replace</span> checkpoint:pre-change
+<span class="k">configure replace</span> flash:other.cfg   <span class="c">! whole new config, no reload</span>
 <span class="c">! drain a switch before work</span>
 maintenance
    unit System
@@ -464,11 +467,55 @@ maintenance
           <li><code>show configuration sessions detail</code></li>
           <li><code>show config checkpoints</code> · <code>show running-config diffs</code></li>
           <li><code>show maintenance</code> · <code>show maintenance summary</code></li>
+          <li><code>show agent</code> · <code>show agent uptime</code> · <code>show agent logs crash</code> (which agents restarted, when, why)</li>
+          <li><code>show processes top once</code> · <code>show uptime</code> · <code>show logging | include AGENT-6-INITIALIZED</code> (an agent started, or restarted)</li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>Forgetting <code>write memory</code>. A reload or a CloudVision reconcile will wipe unsaved work.</li>
           <li>Leaving a session uncommitted. Changes in a session do nothing until <code>commit</code>.</li>
           <li><code>configure replace</code> with a file that lacks management config drops your access.</li>
+          <li>An agent's uptime shorter than the switch's uptime means it restarted. Check <code>show agent logs crash</code> before blaming the network.</li>
+          <li>Never kill Sysdb or use <code>agent X terminate</code> on a production box: killing Sysdb is a reboot without the "unsaved changes" prompt. <span class="pg">AW 7 p.36–37</span></li>
+        </ul></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>SysDB in depth: why it matters</h4><ul>
+          <li><b>Publish/subscribe:</b> each agent mounts the parts of SysDB it cares about. Example: you configure a BGP neighbor, ConfigAgent writes it, the Bgp agent sees the change and brings up the session, learned routes go to SysDB, and the routing and hardware agents (for example SandL3Unicast or StrataL3) program the ASIC. No agent calls another.</li>
+          <li><b>Hitless restarts:</b> because state survives in SysDB, an agent can restart without dropping traffic. The same design lets EOS upgrade or restart pieces of itself: <b>SSU</b> (smart system upgrade, fixed switches keep forwarding while the CPU reloads), and <b>MLAG ISSU</b>, where one peer at a time is upgraded while the other forwards (1.2, 4.1).</li>
+          <li><b>One source of truth for every interface:</b> CLI, eAPI, gNMI/OpenConfig, SNMP and CloudVision all read and write the same SysDB state, so they always agree. eAPI's JSON keys are SysDB's view; that's why <code>| json</code> is reliable (7.3).</li>
+          <li><b>Streaming telemetry:</b> TerminAttr subscribes to SysDB (and the routing state) and streams every change to CloudVision, which keeps the history used in CloudVision's time-series views and snapshots (D2). <b>NetDB</b> is the idea of extending this state network-wide; <b>CVX</b> (ch. 6, 21) is an early form, a central EOS that switches share state with.</li>
+          <li><b>vs IOS:</b> classic IOS is one image in one shared memory space; a bug in one feature can crash the whole router, and state isn't kept across a process restart. IOS XE and NX-OS added process separation later; EOS was built around it from the start.</li>
+        </ul></div>
+        <div class="part"><h4>Where state lives (exam view)</h4>
+<pre>startup-config   flash:, survives reboot
+                 read once at boot into SysDB
+running-config   a rendering of SysDB (RAM)
+                 lost on reboot unless saved
+SysDB            all config + operational state
+                 rebuilt every boot
+config session   staged copy; enters SysDB
+                 only on commit
+checkpoint       saved copy of running-config
+                 on flash (checkpoint:)
+
+<span class="c">! agents and health</span>
+show agent
+show agent uptime
+show agent logs crash
+show processes top once
+show logging | include AGENT-6-INITIALIZED
+<span class="c">! book demo, lab only (don't do this):</span>
+<span class="c">! bash sudo killall -9 Stp     -> no STP change</span>
+<span class="c">! bash sudo killall -9 Sysdb   -> like a reboot</span></pre></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 7, SysDB: notes by page</h4><ul>
+          <li><b>p.35</b> Monolithic OS code grows for years in one block; any crash takes the whole switch down. Linux-style process separation fixes that, but on its own a restarted process (say STP) still starts blind and the network reconverges. EOS adds SysDB so a restarted agent finds its old state and reuses it. Demo setup: two switches, one root, one port discarding.</li>
+          <li><b>p.35–36</b> Turning MST off and on shows the normal path in the log: interfaces move discarding to learning to forwarding. Killing the Stp agent with <code>kill -9</code> instead: the log shows <code>AGENT-6-INITIALIZED</code> for Stp and the interfaces added back, but no state transitions. STP never missed a beat and the neighbor never noticed.</li>
+          <li><b>p.36</b> <code>agent Stp terminate</code> does the same from the CLI; it's undocumented on newer code, as are <code>environment</code> and <code>shutdown</code> under <code>agent</code>. Leave them alone unless TAC tells you otherwise. Killing Sysdb drops your session; within seconds every agent re-initializes, which equals a reboot but in about 30 seconds instead of 4 minutes on a 7280R.</li>
+          <li><b>p.36–37</b> Because Sysdb reloads from startup-config, the book loads a whole new config that way (copy a file to startup-config, kill Sysdb): about 15 seconds, versus about 2 minutes for a reload. Interfaces, protocols and MLAG still take their own time to settle. Unsaved running-config is lost with no warning. The log showed <code>HARDWARE-3-DISRUPTIVE_RESTART</code>: the L3 forwarding agent restarted twice quickly, so hardware routes were flushed and reprogrammed. Don't do this.</li>
+          <li><b>p.37</b> The right way since 4.14: <code>configure replace flash:file</code> loads a new running-config with no reload, and only processes whose config changed are touched (7 seconds in the book). More in ch. 9.</li>
+          <li><b>p.37</b> SysDB is itself an agent in memory, rebuilt at every boot (that's what startup-config is for). It is very robust and essentially never crashes on its own.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="7"></span><span data-ch="8"></span><span data-ch="9"></span><a class="chip" href="https://www.arista.com/en/um-eos" target="_blank" rel="noopener"><b>EOS</b>User Manual</a><a class="chip lab" data-lab="obj-1-1" href="#"><b>LAB</b>D1</a></div>
@@ -556,6 +603,8 @@ Aboot# boot flash:EOS-4.32.2F.swi</pre></div>
   </article>
 
   <div class="practice"><h3>Practice: D1</h3>
+    <details class="q"><summary>The Stp agent crashed and restarted. Did STP reconverge, and how do you prove what happened?</summary><div class="a"><p>No. The restarted agent read its state back from SysDB, so ports didn't go through discarding and learning. Prove it with <code>show agent logs crash</code>, <code>show agent uptime</code> (Stp younger than the switch), and <code>AGENT-6-INITIALIZED</code> in <code>show logging</code> with no STP state-change messages.</p></div></details>
+    <details class="q"><summary><span>Why does <code>show running-config</code> change the moment you commit a config session, but not survive a reload?</span></summary><div class="a"><p>Running-config is a rendering of SysDB in RAM. Commit writes the changes into SysDB; only <code>write memory</code> copies them to startup-config on flash, which is what SysDB is rebuilt from at boot.</p></div></details>
     <details class="q"><summary>You must change an uplink's VLAN list remotely and might lock yourself out. What do you type?</summary><div class="a"><p>Use <code>configure session NAME</code>, make the change, check <code>show session-config diffs</code>, then <code>commit timer 00:05:00</code>. If you can still reach the switch, run <code>configure session NAME commit</code> to keep it. If not, it rolls back by itself.</p></div></details>
     <details class="q"><summary>leaf1 and leaf2 are an MLAG pair. In what order, and when, do you upgrade them?</summary><div class="a"><p>Check ISSU compatibility. Upgrade one peer (often the secondary). Wait until <code>show mlag</code> is active/connected, all MLAG ports are active-full, and reload-delay has expired. Then upgrade the other peer. Hosts dual-homed by LACP stay up throughout.</p></div></details>
     <details class="q"><summary>A hotfix extension is installed but gone after a reload. Why?</summary><div class="a"><p>It was never copied into boot-extensions. Run <code>copy installed-extensions boot-extensions</code>.</p></div></details>
