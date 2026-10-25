@@ -415,7 +415,7 @@ root@eve:~# /opt/unetlab/wrappers/unl_wrapper -a fixpermissions</code></pre>
           <pre class="cli"><code>$ cd arista-l5-dc-training/labs
 $ sed -i 's/Management0/Management1/g' topology/startup/*.cfg avd/group_vars/L5DC.yml avd/group_vars/L5DC_FABRIC.yml
 $ python3 avd/build.py</code></pre></li>
-        <li><p>First boot: vEOS starts in Zero Touch Provisioning. On each console, log in as <code>admin</code> with no password, run <code>zerotouch cancel</code> (the node reloads), then log in again, enter <code>configure</code>, paste that node's file from <code>labs/topology/startup/</code>, and <code>write memory</code>. After that you can reach every node over SSH and eAPI and never need the console again.</p></li>
+        <li><p>First boot: vEOS starts in Zero Touch Provisioning. On each console, log in as <code>admin</code> with no password, run <code>zerotouch cancel</code> (the node reloads), then log in again, enter <code>configure</code>, paste that node's file from <code>labs/topology/startup/</code>, and <code>write memory</code>. After that you can reach every node over SSH and eAPI and never need the console again. Once you have built the <a href="#lab-d2-ztp">ZTP lab</a>, you can let the nodes fetch these files by ZTP instead.</p></li>
         <li><p>Check the links with <code>show lldp neighbors</code> on leaf1: you should see spine1, spine2, leaf2 and host1. If LLDP is empty, LACP and MLAG will also fail; EVE-NG's bridges normally pass these frames, so check your EVE-NG version notes.</p></li>
       </ol>
       <p>Everything else in the guide stays the same, with two swaps. Where a command uses <code>docker exec clab-l5dc-&lt;node&gt; Cli</code>, use SSH or the EVE-NG console. Run the fault script with <code>MODE=eapi labs/capstone/inject-faults.sh ...</code>. To reset a node, copy the AVD config over with <code>scp</code> and run <code>configure replace flash:target.cfg</code>, or wipe the node in EVE-NG and repeat the first-boot step. If the first <code>configure replace</code> to the AVD config says the routing protocol model change needs a reload, run <code>write memory</code> and <code>reload</code> once.</p>
@@ -557,6 +557,181 @@ leaf1# show ip bgp summary
 leaf1# show bgp evpn summary
 host1# ping vrf H10 10.10.10.102 repeat 3</code></pre>
     <aside class="note warn"><strong>Watch out.</strong> <code>configure replace</code> removes everything that is not in the file, including the management plane you are using. The AVD configs in this repo keep eAPI and gNMI on because the AVD inputs add them through <code>structured_config</code> (see <code>labs/avd/group_vars/L5DC_FABRIC.yml</code>). If you write your own replace file, check that <code>management api http-commands</code>, the management IP and the default route are in it before you run the replace.</aside>
+  </section>
+
+  <section class="part" id="lab-d1-sysdb">
+    <h3>SysDB and agents: why an EOS process can crash without an outage</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D" target="_blank" rel="noopener">AW Ch 7 · SysDB</a> (pp. 35-37). SysDB is the idea everything else in EOS is built on: hitless agent restarts, <code>configure replace</code>, ISSU and SSU, and the state CloudVision streams. Expect it in "explain why" questions and as the reason behind many EOS behaviors you will see in the lab exam.</p>
+    <p>This is the first part of the foundations unit, built from AW Ch 7, 8, 9, 12 and 16: SysDB (how EOS works inside), <a href="#lab-d1-cli">CLI power tools</a> (how to drive it fast), objective <a href="#obj-1-1">1.1</a> and <a href="#lab-d1-cfgmgmt">its traps</a> (how to change it safely), <a href="#lab-d1-bash">Bash on the switch</a> (the Linux underneath) and <a href="#lab-d1-extensions">the extension system</a> (how new software gets on). Aboot and ZTP, which act before EOS is running, are in <a href="#lab-d1-aboot">Aboot hands-on</a> and <a href="#lab-d2-ztp">Lab D2</a>.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Older network operating systems were one large program, so a bug in one feature could take down the whole switch, and a restarted process had to relearn everything (p. 35). EOS runs each feature as a separate Linux process, called an <em>agent</em> (Stp, Lldp, Bgp, Lacp, and so on), each in its own protected memory. Agents do not keep their state privately: they write it to <em>SysDB</em>, a central in-memory database, and read other agents' state from it (p. 35). When an agent starts, it first asks SysDB for its state. If it finds none (a fresh boot) it starts from scratch; if it finds state (a restart) it carries on from there. So if Stp crashes, the process manager restarts it, Stp reads the current topology back from SysDB, and the network never reconverges (p. 35). SysDB lives in memory, so it does not survive a reboot; that is the job of startup-config (p. 37).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Event</th><th>What happens</th><th>Network impact</th></tr></thead>
+      <tbody>
+        <tr><td>One agent crashes or is killed (Stp, Lldp)</td><td>The process manager restarts it within about a second; it reloads its state from SysDB and logs <code>AGENT-6-INITIALIZED</code> (p. 36).</td><td>None. No STP topology change, no lost LLDP neighbors.</td></tr>
+        <tr><td>Feature turned off and on (<code>spanning-tree mode none</code>, then <code>mstp</code>)</td><td>The state is deleted, so the agent starts from nothing (p. 36).</td><td>Full reconvergence: ports go discarding, learning, forwarding.</td></tr>
+        <tr><td>SysDB itself is killed</td><td>Every agent loses its state and restarts; running-config is rebuilt from startup-config (p. 36).</td><td>The same as a reload, only faster. Unsaved changes are lost.</td></tr>
+        <tr><td>Forwarding agent restarted twice in quick succession</td><td>EOS gives up on a hitless restart and reprograms the hardware tables (<code>HARDWARE-3-DISRUPTIVE_RESTART</code>, p. 37).</td><td>A brief forwarding outage.</td></tr>
+        <tr><td><code>configure replace</code></td><td>Only the agents whose config changed are touched (p. 37).</td><td>Only what the config change itself causes.</td></tr>
+      </tbody>
+    </table></div>
+    <aside class="note warn"><strong>Watch out.</strong> Killing agents is for a lab only. The book says the same in plain words: never do it on a production switch unless Arista TAC asks you to (pp. 35-36). Everything below runs on cEOS, but expect agent names and timings to differ a little from hardware.</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, list the running agents and their restart counts. Find the Stp and Lldp agents and their Linux process IDs.</p></li>
+      <li><p>Record the STP state of <code>Port-Channel5</code> (toward host1) on leaf1 and on host1. Put a marker in the log, kill the Stp agent with <code>kill -9</code>, and show that it restarted, that STP state did not change, and that the log has no port state transitions.</p></li>
+      <li><p>Do the same with the Lldp agent and check that <code>show lldp neighbors</code> is full immediately after the restart.</p></li>
+      <li><p>Now compare a real reconvergence: put another marker in the log, set <code>spanning-tree mode none</code> on host1, then <code>spanning-tree mode mstp</code> again, and read the log on host1. Use host1, not a leaf, so the fabric is not disturbed.</p></li>
+      <li><p>Lab only: on host2, save the config, then kill SysDB and watch what happens. Time how long until you can log in again.</p></li>
+      <li><p>Explain why <code>configure replace</code> is the right way to load a completely different config, and why the book's trick of killing SysDB to load a new startup-config is not.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · agents and processes</summary>
+      <pre class="cli"><code>leaf1# show agent uptime
+leaf1# show agent uptime | include Stp|Lldp
+leaf1# show processes | include Stp|Lldp|Sysdb
+leaf1# bash ps -eo pid,etime,cmd | grep -E "Stp|Lldp|Sysdb" | grep -v grep</code></pre>
+      <p><code>show agent uptime</code> lists each agent with how long it has run and how many times it has restarted; a non-zero restart count on a healthy switch is worth a TAC case. Several processes may match <code>Stp</code> (for example <code>Stp</code> and <code>StpTopology</code>); the book kills everything matching the name (p. 36). Agent crash details, when there are any, go to <code>/var/log/agents/</code> and appear in <code>show tech-support</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · kill Stp and Lldp, no reconvergence</summary>
+      <pre class="cli"><code>leaf1# show spanning-tree interface Port-Channel5
+host1# show spanning-tree
+leaf1# send log message KILLING-STP
+leaf1# bash sudo killall -9 Stp
+leaf1# show logging last 2 minutes
+leaf1# show agent uptime | include Stp
+leaf1# show spanning-tree interface Port-Channel5
+
+leaf1# send log message KILLING-LLDP
+leaf1# bash sudo killall -9 Lldp
+leaf1# show lldp neighbors
+leaf1# show logging last 2 minutes | include Lldp|AGENT</code></pre>
+      <pre class="out"><code>Oct 25 14:02:11 leaf1 ConfigAgent: %SYS-6-LOGMSG_INFO: Message from admin on vty3: KILLING-STP
+Oct 25 14:02:13 leaf1 Stp: %AGENT-6-INITIALIZED: Agent 'Stp' initialized; pid=8812
+Oct 25 14:02:13 leaf1 Stp: %SPANTREE-6-INTERFACE_ADD: Interface Port-Channel5 has been added to instance MST0</code></pre>
+      <p>Representative output. If <code>send log message</code> is not accepted, check <code>send log ?</code> on your release. The interface is added back to MST0, but there is no "moving from discarding to learning" or "learning to forwarding" line, because Stp found the state already in SysDB and did not have to run the protocol from scratch (p. 36). The restart count in <code>show agent uptime</code> went up by one. LLDP neighbors are there straight away for the same reason. The book also shows an undocumented <code>agent ... terminate</code> command; leave it, and the agent <code>shutdown</code> and <code>environment</code> options, alone unless TAC asks (p. 36).</p>
+    </details>
+    <details class="solution"><summary>Solution · a real reconvergence, for comparison</summary>
+      <pre class="cli"><code>host1# send log message STP-OFF-ON
+host1(config)# spanning-tree mode none
+host1(config)# spanning-tree mode mstp
+host1# show logging last 2 minutes | include SPANTREE</code></pre>
+      <pre class="out"><code>host1 StpTopology: %SPANTREE-6-DISABLED: STP is disabled.
+host1 Stp: %SPANTREE-6-INTERFACE_DEL: Interface Port-Channel1 has been removed from instance MST0
+host1 StpTopology: %SPANTREE-6-MODE_CHANGE: Spanning tree mode is now mstp.
+host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from discarding to learning
+host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from learning to forwarding</code></pre>
+      <p>This time the state was deleted when STP was turned off, so the agent started from nothing and the port walked through discarding, learning and forwarding (p. 36). host1's pings to its gateway stall for that time. Killing the process caused no outage; turning the feature off and on did.</p>
+    </details>
+    <details class="solution"><summary>Solution · kill SysDB (lab only, host2)</summary>
+      <pre class="cli"><code>host2# write memory
+host2# bash sudo killall -9 Sysdb
+! the session drops; log in again after a short wait
+$ ssh admin@172.100.100.32
+host2# show logging | include AGENT-6-INITIALIZED
+host2# show agent uptime</code></pre>
+      <p>Your session closes, every agent loses its connection to SysDB and restarts, and the switch comes back running startup-config, which is the same result as a reload but much faster (the book saw about 30 seconds against more than 4 minutes for a full reload on a 7280R, p. 36). Anything not saved is gone, with no warning (p. 37). On cEOS the whole container may restart instead; if host2 does not come back, run <code>docker restart clab-l5dc-host2</code> (or restart the node in EVE-NG).</p>
+      <p>The book then uses this to load a new config: copy a different file to startup-config and kill SysDB (pp. 36-37). It works, but it is a reload in disguise, and it can trigger the disruptive hardware restart shown above. <code>configure replace flash:FILE</code> does the same job in seconds with no reload, touches only what changed, and with a configuration session you can review the diff and use <code>commit timer</code> for an automatic rollback (objective <a href="#obj-1-1">1.1</a>). That is the only method to use on a real network (p. 37).</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Know the chain: agents keep state in SysDB, so an agent restart is hitless; SysDB is in memory, so a reboot needs startup-config; and the same separation is what makes <code>configure replace</code>, configuration sessions and SSU/ISSU possible. If a question asks why EOS can restart a protocol process without a topology change, the answer is state in SysDB, not "fast timers".</aside>
+    <aside class="note real"><strong>Real world.</strong> The SysDB model is also why CloudVision sees so much: TerminAttr subscribes to state changes on the switch and streams them, so CloudVision gets the same live state the agents use, not a five-minute SNMP poll. And because a single crashing agent rarely causes an outage, watch for it explicitly: alert on <code>AGENT-6-INITIALIZED</code> outside boot time and on rising restart counts in <code>show agent uptime</code>, and open a TAC case with <code>show tech-support</code> when you see one.</aside>
+  </section>
+
+  <section class="part" id="lab-d1-cli">
+    <h3>EOS CLI power tools</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/28%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633624%5D!/4/2/2%5Bintroduction_to_eos%5D" target="_blank" rel="noopener">AW Ch 8 · Introduction to EOS</a> (pp. 39-45). It is the middle of the foundations unit: SysDB explains how EOS works, this section is how you drive it fast, and objective 1.1 is how you change it safely. On a timed, hands-on exam the CLI tricks below are worth real minutes.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> EOS runs on an unmodified Linux kernel and you can reach the shell, but the CLI is deliberately close to the industry standard (p. 39). Agents keep their state in SysDB, so features are isolated and restartable (p. 39). There is one EOS image for every Arista switch: the image loads the right driver for the ASIC it finds, so the same <code>.swi</code> file runs on a small fixed switch and a large chassis, and support for old ASICs is dropped from newer images over time (p. 39). Out of the box only SSH is allowed (telnet is off), passwords are stored as SHA-512 with <code>secret</code>, and there is no <code>service password-encryption</code> because clear text is not an option (p. 39). EOS answers a typo with a plain "% Invalid input" and no caret (pp. 39-40).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Tool</th><th>Example</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Help and completion</td><td><code>ro?</code>, <code>rou&lt;Tab&gt;</code></td><td><code>?</code> lists matches, Tab completes the longest unique match (p. 40).</td></tr>
+        <tr><td>Line editing</td><td>Ctrl-A, Ctrl-E, Ctrl-B, Ctrl-F, Esc-B, Esc-F</td><td>Start and end of line, back and forward one character, back and forward one word (p. 40).</td></tr>
+        <tr><td>Mode changes</td><td>Type <code>interface Ethernet2</code> from inside <code>router bgp</code></td><td>No need to <code>exit</code> first; EOS moves to the right mode. <code>end</code> or Ctrl-Z leaves configuration (p. 40).</td></tr>
+        <tr><td>Exec commands in config mode</td><td><code>show ip bgp summary</code> at a config prompt</td><td>No <code>do</code> needed (p. 41).</td></tr>
+        <tr><td>Interface ranges</td><td><code>interface Ethernet1-3,5</code>, <code>interface Ethernet1-$</code></td><td>No <code>range</code> keyword; <code>$</code> means the last port. On switches with lanes, use <code>Ethernet1-$/$</code> (p. 41).</td></tr>
+        <tr><td>Number expansion</td><td><code>ip address 10.1.{1,4}.1/24</code>, <code>description ROW-{1,7,2,2}</code></td><td><code>{start,end,step,pad}</code> gives one value per interface in the range: 1 to 4, or 01, 03, 05, 07 (pp. 40-41).</td></tr>
+        <tr><td>Current section</td><td><code>show active</code></td><td>Same as <code>show running-config section</code> for the mode you are in (p. 41).</td></tr>
+        <tr><td>Defaults</td><td><code>show running-config all interfaces Ethernet1</code></td><td>Shows every setting, including defaults that the normal view hides (p. 42).</td></tr>
+        <tr><td>Filters</td><td><code>| include</code>, <code>| exclude</code>, <code>| begin</code>, <code>| section</code>, <code>| nz</code>, <code>| json</code>, <code>| no-more</code></td><td><code>show ... | ?</code> lists them. <code>nz</code> hides all-zero counter rows (pp. 41-42).</td></tr>
+        <tr><td>Linux tools</td><td><code>| grep -i</code>, <code>| egrep</code>, <code>| awk</code>, <code>| tail</code>, <code>| wc -l</code></td><td>Work after any show command, even though most are not in the <code>| ?</code> list (pp. 42-44).</td></tr>
+        <tr><td>Save output</td><td><code>| redirect flash:out.txt</code>, <code>| append ...</code>, <code>| tee ...</code>, or <code>| tail &gt; /mnt/flash/out.txt</code></td><td>EOS filters take EOS paths; a Linux redirect needs the full Linux path (p. 44).</td></tr>
+        <tr><td>Live log</td><td><code>show logging follow</code></td><td>Like <code>tail -f</code>; Ctrl-C to stop (p. 44).</td></tr>
+        <tr><td>Aliases</td><td><code>alias senz show interfaces counters errors | nz</code></td><td>Aliases can take arguments (<code>%1</code>, <code>%2</code>) and can run several lines (p. 42).</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p>On leaf1, enter <code>interface Ethernet1-$</code> and run <code>show active</code>. Which ports did <code>$</code> select, and why only those on cEOS?</p></li>
+      <li><p>Create <code>Loopback101</code> to <code>Loopback104</code> in one command. Give them addresses 192.0.2.1 to 192.0.2.4 (/32) and descriptions <code>LAB-01</code>, <code>LAB-02</code> and so on, each with one command. Then do it again with only odd numbers (192.0.2.1, .3, .5, .7). Remove the loopbacks.</p></li>
+      <li><p>Find every line of leaf1's config that mentions BGP, in any case, and then the same with context (which section each line belongs to). Compare <code>| include bgp</code>, <code>| include BGP</code>, <code>| grep -i bgp</code> and <code>| section bgp</code>.</p></li>
+      <li><p>List every interface on leaf1 with its MAC address, one line each. Then make it an alias <code>shmc</code>.</p></li>
+      <li><p>Create an alias <code>senz</code> that shows only interfaces with errors, and a multi-line alias <code>intdesc</code> that takes an interface and a description and sets it. Test both, then remove them.</p></li>
+      <li><p>Save the last 20 log lines that mention BGP to <code>flash:bgp-log.txt</code>, once with an EOS filter and once with a Linux redirect. Check both files with <code>dir flash:</code>.</p></li>
+      <li><p>Show <code>Ethernet1</code> with and without defaults and name two settings you only see with <code>all</code>.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · ranges, expansion, show active</summary>
+      <pre class="cli"><code>leaf1(config)# interface Ethernet1-$
+leaf1(config-if-Et1-5)# show active
+leaf1(config-if-Et1-5)# exit
+
+leaf1(config)# interface Loopback101-104
+leaf1(config-if-Lo101-104)# ip address 192.0.2.{1,4}/32
+leaf1(config-if-Lo101-104)# description LAB-{1,4,1,2}
+leaf1(config-if-Lo101-104)# show active
+leaf1(config-if-Lo101-104)# ip address 192.0.2.{1,7,2}/32
+leaf1(config-if-Lo101-104)# show active
+leaf1(config)# no interface Loopback101-104</code></pre>
+      <p>On cEOS, <code>$</code> stops at Ethernet5 because containerlab only created the ports that are wired. The expansion gives one value per interface in order: <code>{1,4}</code> counts 1 to 4, <code>{1,7,2}</code> counts 1, 3, 5, 7, and the fourth field pads with zeros to that width (pp. 40-41). If your release rejects a range of loopbacks, do the same on a range of Ethernet ports in a lab-only node such as host2 and restore it with <code>configure replace</code> afterwards.</p>
+    </details>
+    <details class="solution"><summary>Solution · finding config, include vs grep vs section</summary>
+      <pre class="cli"><code>leaf1# show running-config | include bgp
+leaf1# show running-config | include BGP
+leaf1# show running-config | grep -i bgp
+leaf1# show running-config | section bgp
+leaf1# show running-config section mlag</code></pre>
+      <p><code>include</code> and <code>grep</code> are case-sensitive, so <code>bgp</code> and <code>BGP</code> each find only part of the lines; <code>grep -i</code> finds both, but a matching <code>description</code> line does not tell you which interface it is under. <code>section</code> ignores case and prints each match with its whole section, so you see the interface and the full <code>router bgp</code> block (pp. 44-45). For any feature, <code>show running-config section NAME</code> is the fastest way to read its whole config.</p>
+    </details>
+    <details class="solution"><summary>Solution · MAC list and aliases</summary>
+      <pre class="cli"><code>leaf1# show interfaces | awk '/^[A-Z]/ {intf=$1} /, address is/ {print intf, $6}'
+leaf1(config)# alias shmc show interfaces | awk '/^[A-Z]/ {intf=$1} /, address is/ {print intf, $6}'
+leaf1# shmc
+
+leaf1(config)# alias senz show interfaces counters errors | nz
+leaf1(config)# alias intdesc
+leaf1(config-alias-intdesc)# 10 configure
+leaf1(config-alias-intdesc)# 20 interface %1
+leaf1(config-alias-intdesc)# 30 description %2
+leaf1(config-alias-intdesc)# 40 end
+leaf1(config-alias-intdesc)# exit
+leaf1# senz
+leaf1# intdesc Loopback0 TEST-ALIAS
+leaf1# show running-config interfaces Loopback0
+
+leaf1(config)# no alias shmc
+leaf1(config)# no alias senz
+leaf1(config)# no alias intdesc
+leaf1(config)# interface Loopback0
+leaf1(config-if-Lo0)# description ROUTER_ID</code></pre>
+      <p>The awk program remembers the interface name from each line that starts with a capital letter and prints it with the MAC from the "address is" line (p. 42). An alias must be entered on one line (p. 42). The multi-line alias form and its prompt can differ slightly by release; check <code>alias intdesc ?</code>. Put back Loopback0's original description (check leaf2 or the AVD config for the exact text) or restore with <code>configure replace</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · saving output, defaults</summary>
+      <pre class="cli"><code>leaf1# show logging | include BGP | redirect flash:bgp-log.txt
+leaf1# show logging | grep BGP | tail -20 &gt; /mnt/flash/bgp-log2.txt
+leaf1# dir flash: | include bgp-log
+
+leaf1# show running-config interfaces Ethernet1
+leaf1# show running-config all interfaces Ethernet1</code></pre>
+      <p><code>redirect</code>, <code>append</code> and <code>tee</code> are EOS filters and take an EOS path such as <code>flash:</code>. After a Linux command such as <code>tail</code>, the output goes through the Linux shell, so you need the Linux path <code>/mnt/flash/</code> (p. 44). The <code>all</code> view adds defaults such as <code>no shutdown</code>, <code>default load-interval</code>, <code>no mac-address</code> and flow-control settings (p. 42). Delete the two files when you are done.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Three habits save the most time in the lab: <code>show running-config section NAME</code> to read one feature, <code>show active</code> to check what you just typed in the current mode, and <code>| nz</code> on counters. Use <code>| grep</code>, not a second <code>| include</code>, whenever you chain two filters.</aside>
+    <aside class="note real"><strong>Real world.</strong> Keep a small, shared set of aliases in your base config (AVD and CloudVision configlets can push them) so every engineer has the same shortcuts. Avoid an alias with the same name as a real command, and remember that a script run by someone else will not have your aliases.</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject: a colleague's audit runbook says to check that every interface has a description with <code>show interfaces | include Ethernet | include Description</code>. Run it on leaf1.</p>
+      <p>Symptom: the output does not show interface names next to their descriptions, and changes in an unexpected way when you swap the two filters. The colleague concludes that descriptions are missing.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p><code>include</code> is part of the EOS CLI, not a Linux pipe, so a second <code>include</code> does not simply filter the output of the first (pp. 41-42). Chain Linux tools instead, or use a command built for the job:</p>
+        <pre class="cli"><code>leaf1# show interfaces | grep -E "^Ethernet|Description"
+leaf1# show interfaces description
+leaf1# show running-config | section interface Ethernet</code></pre>
+        <p>The descriptions are all there. Fix the runbook, and test any filtered command against the full output once before you trust it.</p>
+      </details>
+    </div>
   </section>
 
   <section class="part" id="obj-1-1">
@@ -711,83 +886,293 @@ leaf1# dir flash:schedule/cfg-archive/</code></pre>
     </div>
   </section>
 
-  <section class="part" id="lab-d1-sysdb">
-    <h3>SysDB and agents: why an EOS process can crash without an outage</h3>
-    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D" target="_blank" rel="noopener">AW Ch 7 · SysDB</a> (pp. 35-37). SysDB is the idea everything else in EOS is built on: hitless agent restarts, <code>configure replace</code>, ISSU and SSU, and the state CloudVision streams. Expect it in "explain why" questions and as the reason behind many EOS behaviors you will see in the lab exam.</p>
-    <aside class="note"><strong>Key ideas from the chapter.</strong> Older network operating systems were one large program, so a bug in one feature could take down the whole switch, and a restarted process had to relearn everything (p. 35). EOS runs each feature as a separate Linux process, called an <em>agent</em> (Stp, Lldp, Bgp, Lacp, and so on), each in its own protected memory. Agents do not keep their state privately: they write it to <em>SysDB</em>, a central in-memory database, and read other agents' state from it (p. 35). When an agent starts, it first asks SysDB for its state. If it finds none (a fresh boot) it starts from scratch; if it finds state (a restart) it carries on from there. So if Stp crashes, the process manager restarts it, Stp reads the current topology back from SysDB, and the network never reconverges (p. 35). SysDB lives in memory, so it does not survive a reboot; that is the job of startup-config (p. 37).</aside>
+  <section class="part" id="lab-d1-cfgmgmt">
+    <h3>Configuration management traps: merge, replace and the session snapshot</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/30%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633000%5D!/4/2/2%5Bconfiguration_management%5D" target="_blank" rel="noopener">AW Ch 9 · Configuration Management</a> (pp. 45-49) and closes the foundations unit. Objective 1.1 above taught the tools; this part is about the ways they surprise people. The chapter's one big message: in EOS, only <code>copy</code> merges. <code>configure replace</code>, checkpoint restore and session commit all replace the whole running config, which is what makes them powerful and what makes them dangerous (pp. 45, 49).</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> The CLI is additive: to remove a line you must type its <code>no</code> form, so before <code>configure replace</code> the only way to load a completely different config was to negate everything by hand or overwrite startup-config and reload (p. 45). <code>copy FILE running-config</code> merges: it adds the file's lines and removes nothing. <code>configure replace FILE</code> makes running-config equal to the file, so a two-line file leaves a two-line switch, with the hostname back to <code>localhost</code> and no management address (p. 45). Sections that do not change are not touched at all, so replacing a config that keeps the same BGP section does not disturb BGP (p. 45). A checkpoint restore is a replace from the checkpoint file, so it undoes anything done after the checkpoint (p. 47). A configuration session is not a list of commands: it is a copy of running-config taken when the session starts, with your commands applied to it, and commit replaces running-config with that copy (pp. 47-48).</aside>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th>Event</th><th>What happens</th><th>Network impact</th></tr></thead>
+      <thead><tr><th>Operation</th><th>Merge or replace</th><th>Where it lives</th><th>Survives reload</th></tr></thead>
       <tbody>
-        <tr><td>One agent crashes or is killed (Stp, Lldp)</td><td>The process manager restarts it within about a second; it reloads its state from SysDB and logs <code>AGENT-6-INITIALIZED</code> (p. 36).</td><td>None. No STP topology change, no lost LLDP neighbors.</td></tr>
-        <tr><td>Feature turned off and on (<code>spanning-tree mode none</code>, then <code>mstp</code>)</td><td>The state is deleted, so the agent starts from nothing (p. 36).</td><td>Full reconvergence: ports go discarding, learning, forwarding.</td></tr>
-        <tr><td>SysDB itself is killed</td><td>Every agent loses its state and restarts; running-config is rebuilt from startup-config (p. 36).</td><td>The same as a reload, only faster. Unsaved changes are lost.</td></tr>
-        <tr><td>Forwarding agent restarted twice in quick succession</td><td>EOS gives up on a hitless restart and reprograms the hardware tables (<code>HARDWARE-3-DISRUPTIVE_RESTART</code>, p. 37).</td><td>A brief forwarding outage.</td></tr>
-        <tr><td><code>configure replace</code></td><td>Only the agents whose config changed are touched (p. 37).</td><td>Only what the config change itself causes.</td></tr>
+        <tr><td><code>copy flash:FILE running-config</code></td><td>Merge: adds lines, removes nothing (p. 45)</td><td>The file on flash</td><td>Yes (the file); the result only after <code>write memory</code></td></tr>
+        <tr><td><code>configure replace flash:FILE</code></td><td>Replace: running-config becomes the file (p. 45)</td><td>The file on flash</td><td>Yes (the file)</td></tr>
+        <tr><td><code>configure checkpoint save NAME</code> / <code>restore NAME</code></td><td>Restore is a replace (p. 47)</td><td>Plain text in <code>/mnt/flash/.checkpoints/</code>, also reachable as <code>checkpoint:</code>; default limit 20, set with <code>service configuration checkpoint max saved</code> (up to 100); the space they use is not shown in <code>show configuration checkpoints</code> (p. 47)</td><td>Yes</td></tr>
+        <tr><td><code>configure session NAME</code> then <code>commit</code></td><td>Replace with the session's copy (p. 48)</td><td>Memory only; default 5 pending and 1 completed, set with <code>service configuration session max pending | completed</code> (up to 20, p. 49)</td><td>No (p. 48)</td></tr>
+        <tr><td><code>commit timer</code> that expires</td><td>Replace back to an automatic checkpoint taken at commit (p. 48)</td><td>A system session named like <code>cfg-NNNN--NNNNNNNNN-0</code>, described as "config replace of commitTimerCheckPointConfig" (p. 48)</td><td>No</td></tr>
+        <tr><td><code>rollback clean-config</code> inside a session</td><td>Replaces the session's copy with factory defaults (p. 49)</td><td>The session</td><td>No</td></tr>
       </tbody>
     </table></div>
-    <aside class="note warn"><strong>Watch out.</strong> Killing agents is for a lab only. The book says the same in plain words: never do it on a production switch unless Arista TAC asks you to (pp. 35-36). Everything below runs on cEOS, but expect agent names and timings to differ a little from hardware.</aside>
+    <aside class="note warn"><strong>Watch out.</strong> Tasks 1 and 4 deliberately wreck a switch. Use host2 only, never a leaf or spine, and run <code>write memory</code> on host2 first so startup-config is a good copy to come back to. Keep a console open: on containerlab that is <code>docker exec -it clab-l5dc-host2 Cli</code>, on EVE-NG the node's console.</aside>
     <ol class="tasks">
-      <li><p>On leaf1, list the running agents and their restart counts. Find the Stp and Lldp agents and their Linux process IDs.</p></li>
-      <li><p>Record the STP state of <code>Port-Channel5</code> (toward host1) on leaf1 and on host1. Put a marker in the log, kill the Stp agent with <code>kill -9</code>, and show that it restarted, that STP state did not change, and that the log has no port state transitions.</p></li>
-      <li><p>Do the same with the Lldp agent and check that <code>show lldp neighbors</code> is full immediately after the restart.</p></li>
-      <li><p>Now compare a real reconvergence: put another marker in the log, set <code>spanning-tree mode none</code> on host1, then <code>spanning-tree mode mstp</code> again, and read the log on host1. Use host1, not a leaf, so the fabric is not disturbed.</p></li>
-      <li><p>Lab only: on host2, save the config, then kill SysDB and watch what happens. Time how long until you can log in again.</p></li>
-      <li><p>Explain why <code>configure replace</code> is the right way to load a completely different config, and why the book's trick of killing SysDB to load a new startup-config is not.</p></li>
+      <li><p>On host2, create a two-line file <code>flash:snippet.cfg</code> that sets a description <code>MERGE-TEST</code> on <code>Ethernet1</code>. Load it with <code>copy</code> and confirm the rest of the config is untouched. Then preview what <code>configure replace flash:snippet.cfg</code> would do, without actually doing it, and count what would be removed.</p></li>
+      <li><p>On host2, save checkpoint <code>CK-A</code>. Then add the description <code>LATER-CHANGE</code> to <code>Ethernet2</code>. Restore <code>CK-A</code> and check Ethernet2. Find the checkpoint file in Linux and restore it a second way with <code>configure replace</code>.</p></li>
+      <li><p>The lost-change trap. On host2, start session <code>S1</code> and add the description <code>FROM-SESSION</code> to <code>Ethernet1</code>, then leave it pending. In plain configuration mode, add the description <code>DIRECT</code> to <code>Ethernet2</code>. Before committing S1, predict what happens to <code>DIRECT</code>, prove it with the session diff, then commit and check. Then repeat, but this time keep both changes.</p></li>
+      <li><p>In a session on host2, run <code>rollback clean-config</code>, read the session config, and abort. Then check the session limits and how many pending and completed sessions are kept.</p></li>
+      <li><p>After the 2-minute commit timer in objective 1.1 (task 5) expires on leaf1, run <code>show configuration sessions detail</code> and find the session EOS made for the rollback.</p></li>
     </ol>
-    <details class="solution"><summary>Solution · agents and processes</summary>
-      <pre class="cli"><code>leaf1# show agent uptime
-leaf1# show agent uptime | include Stp|Lldp
-leaf1# show processes | include Stp|Lldp|Sysdb
-leaf1# bash ps -eo pid,etime,cmd | grep -E "Stp|Lldp|Sysdb" | grep -v grep</code></pre>
-      <p><code>show agent uptime</code> lists each agent with how long it has run and how many times it has restarted; a non-zero restart count on a healthy switch is worth a TAC case. Several processes may match <code>Stp</code> (for example <code>Stp</code> and <code>StpTopology</code>); the book kills everything matching the name (p. 36). Agent crash details, when there are any, go to <code>/var/log/agents/</code> and appear in <code>show tech-support</code>.</p>
-    </details>
-    <details class="solution"><summary>Solution · kill Stp and Lldp, no reconvergence</summary>
-      <pre class="cli"><code>leaf1# show spanning-tree interface Port-Channel5
-host1# show spanning-tree
-leaf1# send log message KILLING-STP
-leaf1# bash sudo killall -9 Stp
-leaf1# show logging last 2 minutes
-leaf1# show agent uptime | include Stp
-leaf1# show spanning-tree interface Port-Channel5
-
-leaf1# send log message KILLING-LLDP
-leaf1# bash sudo killall -9 Lldp
-leaf1# show lldp neighbors
-leaf1# show logging last 2 minutes | include Lldp|AGENT</code></pre>
-      <pre class="out"><code>Oct 25 14:02:11 leaf1 ConfigAgent: %SYS-6-LOGMSG_INFO: Message from admin on vty3: KILLING-STP
-Oct 25 14:02:13 leaf1 Stp: %AGENT-6-INITIALIZED: Agent 'Stp' initialized; pid=8812
-Oct 25 14:02:13 leaf1 Stp: %SPANTREE-6-INTERFACE_ADD: Interface Port-Channel5 has been added to instance MST0</code></pre>
-      <p>Representative output. If <code>send log message</code> is not accepted, check <code>send log ?</code> on your release. The interface is added back to MST0, but there is no "moving from discarding to learning" or "learning to forwarding" line, because Stp found the state already in SysDB and did not have to run the protocol from scratch (p. 36). The restart count in <code>show agent uptime</code> went up by one. LLDP neighbors are there straight away for the same reason. The book also shows an undocumented <code>agent ... terminate</code> command; leave it, and the agent <code>shutdown</code> and <code>environment</code> options, alone unless TAC asks (p. 36).</p>
-    </details>
-    <details class="solution"><summary>Solution · a real reconvergence, for comparison</summary>
-      <pre class="cli"><code>host1# send log message STP-OFF-ON
-host1(config)# spanning-tree mode none
-host1(config)# spanning-tree mode mstp
-host1# show logging last 2 minutes | include SPANTREE</code></pre>
-      <pre class="out"><code>host1 StpTopology: %SPANTREE-6-DISABLED: STP is disabled.
-host1 Stp: %SPANTREE-6-INTERFACE_DEL: Interface Port-Channel1 has been removed from instance MST0
-host1 StpTopology: %SPANTREE-6-MODE_CHANGE: Spanning tree mode is now mstp.
-host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from discarding to learning
-host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from learning to forwarding</code></pre>
-      <p>This time the state was deleted when STP was turned off, so the agent started from nothing and the port walked through discarding, learning and forwarding (p. 36). host1's pings to its gateway stall for that time. Killing the process caused no outage; turning the feature off and on did.</p>
-    </details>
-    <details class="solution"><summary>Solution · kill SysDB (lab only, host2)</summary>
+    <details class="solution"><summary>Solution · merge vs replace preview (host2)</summary>
       <pre class="cli"><code>host2# write memory
-host2# bash sudo killall -9 Sysdb
-! the session drops; log in again after a short wait
-$ ssh admin@172.100.100.32
-host2# show logging | include AGENT-6-INITIALIZED
-host2# show agent uptime</code></pre>
-      <p>Your session closes, every agent loses its connection to SysDB and restarts, and the switch comes back running startup-config, which is the same result as a reload but much faster (the book saw about 30 seconds against more than 4 minutes for a full reload on a 7280R, p. 36). Anything not saved is gone, with no warning (p. 37). On cEOS the whole container may restart instead; if host2 does not come back, run <code>docker restart clab-l5dc-host2</code> (or restart the node in EVE-NG).</p>
-      <p>The book then uses this to load a new config: copy a different file to startup-config and kill SysDB (pp. 36-37). It works, but it is a reload in disguise, and it can trigger the disruptive hardware restart shown above. <code>configure replace flash:FILE</code> does the same job in seconds with no reload, touches only what changed, and with a configuration session you can review the diff and use <code>commit timer</code> for an automatic rollback (objective <a href="#obj-1-1">1.1</a>). That is the only method to use on a real network (p. 37).</p>
+host2# bash printf 'interface Ethernet1\n   description MERGE-TEST\n' &gt; /mnt/flash/snippet.cfg
+host2# more flash:snippet.cfg
+host2# copy flash:snippet.cfg running-config
+! Missing final 'end' command, adding automatically.
+host2# show running-config interfaces Ethernet1
+host2# show running-config | include hostname|Management0
+
+host2# configure session PREVIEW
+host2(config-s-PREVIE)# rollback clean-config
+host2(config-s-PREVIE)# copy flash:snippet.cfg session-config
+host2(config-s-PREVIE)# show session-config diffs | grep -c "^-"
+host2(config-s-PREVIE)# show session-config diffs | include hostname|ip address|management
+host2(config-s-PREVIE)# abort</code></pre>
+      <p>After the <code>copy</code>, Ethernet1 has the description and keeps <code>channel-group 1 mode active</code>; nothing else changed (p. 45). The session preview is the safe way to see a replace before it happens: <code>rollback clean-config</code> plus <code>copy ... session-config</code> builds exactly what <code>configure replace</code> would build, and the diff shows dozens of minus lines, including the hostname, the Management0 address, the default route, eAPI, the VRFs and the port-channel. <code>abort</code> throws it away. The break/fix below does the replace for real.</p>
     </details>
-    <aside class="note exam"><strong>Exam tip.</strong> Know the chain: agents keep state in SysDB, so an agent restart is hitless; SysDB is in memory, so a reboot needs startup-config; and the same separation is what makes <code>configure replace</code>, configuration sessions and SSU/ISSU possible. If a question asks why EOS can restart a protocol process without a topology change, the answer is state in SysDB, not "fast timers".</aside>
-    <aside class="note real"><strong>Real world.</strong> The SysDB model is also why CloudVision sees so much: TerminAttr subscribes to state changes on the switch and streams them, so CloudVision gets the same live state the agents use, not a five-minute SNMP poll. And because a single crashing agent rarely causes an outage, watch for it explicitly: alert on <code>AGENT-6-INITIALIZED</code> outside boot time and on rising restart counts in <code>show agent uptime</code>, and open a TAC case with <code>show tech-support</code> when you see one.</aside>
+    <details class="solution"><summary>Solution · checkpoint restore loses later work (host2)</summary>
+      <pre class="cli"><code>host2# configure checkpoint save CK-A
+host2(config)# interface Ethernet2
+host2(config-if-Et2)# description LATER-CHANGE
+host2(config-if-Et2)# show active
+host2(config-if-Et2)# configure checkpoint restore CK-A
+host2(config-if-Et2)# show active
+! description LATER-CHANGE is gone
+host2# bash ls -al /mnt/flash/.checkpoints/
+host2# configure replace checkpoint:CK-A
+host2# show configuration checkpoints</code></pre>
+      <p>The restore is a replace, so a change made after the checkpoint disappears, even one that has nothing to do with the problem you were undoing (p. 47). The checkpoint files are plain text on flash, so they survive a reload and use flash space (p. 47). Before restoring on a real switch, run <code>diff checkpoint:CK-A running-config</code> (or compare the two files in bash) so you know what you are about to lose.</p>
+    </details>
+    <details class="solution"><summary>Solution · the session snapshot trap (host2)</summary>
+      <pre class="cli"><code>host2# configure session S1
+host2(config-s-S1)# interface Ethernet1
+host2(config-s-S1-if-Et1)# description FROM-SESSION
+host2(config-s-S1-if-Et1)# end
+host2# configure
+host2(config)# interface Ethernet2
+host2(config-if-Et2)# description DIRECT
+host2(config-if-Et2)# end
+host2# show session-config named S1 diffs</code></pre>
+      <pre class="out"><code> interface Ethernet1
++   description FROM-SESSION
+    channel-group 1 mode active
+ !
+ interface Ethernet2
+-   description DIRECT
+    channel-group 1 mode active</code></pre>
+      <pre class="cli"><code>host2# configure session S1 commit
+host2# show running-config interfaces Ethernet1-2
+
+! the safe way: put the direct change in the session too, or start a fresh session
+host2# configure session S2
+host2(config-s-S2)# interface Ethernet1
+host2(config-s-S2-if-Et1)# description FROM-SESSION
+host2(config-s-S2-if-Et1)# interface Ethernet2
+host2(config-s-S2-if-Et2)# description DIRECT
+host2(config-s-S2-if-Et2)# show session-config diffs
+host2(config-s-S2-if-Et2)# commit</code></pre>
+      <p>Representative output. The session holds the running-config as it was when <code>S1</code> started, so <code>DIRECT</code> shows as a line to be removed, and the commit removes it (pp. 47-48). The rule: read the session diff just before you commit, and if it shows minus lines you did not type, someone (maybe you) changed the switch in the meantime. <code>abort</code> and start again, or add the missing change to the session. Clean up with <code>default interface</code> descriptions or <code>configure replace flash:startup-config</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · clean-config, limits and the timer rollback</summary>
+      <pre class="cli"><code>host2# configure session BLANK
+host2(config-s-BLANK)# rollback clean-config
+host2(config-s-BLANK)# show session-config
+host2(config-s-BLANK)# abort
+host2(config)# service configuration session max ?
+host2# show configuration sessions
+
+leaf1# show configuration sessions detail</code></pre>
+      <p><code>rollback clean-config</code> leaves only defaults in the session: the same result as <code>write erase</code> and a reload, but nothing happens until you commit (p. 49). It is the first step of every full-config push that CloudVision makes. Leave the session limits at their defaults unless you have a reason: sessions are kept uncompressed in memory, and a large config multiplied by 20 adds up (p. 49). After the timer expires on leaf1, the list shows a session with a generated name and the description "config replace of commitTimerCheckPointConfig": EOS saved a checkpoint at commit time and replaced back to it (p. 48). The User and Terminal columns are only filled in while someone is inside a session (p. 48).</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> If a task says "apply this config" and gives you a partial file or snippet, it means merge: paste it, or <code>copy</code> it to running-config. Use <code>configure replace</code> only with a complete config. And never mix a pending session with direct edits: commit or abort the session before you type in plain <code>configure</code> again.</aside>
+    <aside class="note real"><strong>Real world.</strong> The session snapshot is exactly why an out-of-band CLI fix vanishes on the next CloudVision or AVD push: the push replaces the whole config with the designed one. Put the fix into the source of truth (configlet, Studio or AVD inputs) first. Use the commit timer for anything that touches your own path to the switch; the book's author learned <code>reload in</code> the hard way after an empty ACL cut off a whole country, and a commit timer does the same job without a reboot (p. 48).</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject: a change ticket says "apply <code>flash:snippet.cfg</code> to host2", and a colleague runs <code>configure replace flash:snippet.cfg</code> over SSH.</p>
+      <p>Symptom: the SSH session freezes, host2 no longer answers on 172.100.100.32, eAPI and gNMI are gone, and host2's pings into the fabric fail. leaf3 and leaf4 show <code>Port-Channel5</code> down.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>A replace with a two-line file removed everything else, including the management address, the default route and the port-channel; the hostname is now <code>localhost</code> (p. 45). There is no SSH, so use the console, and replace back to the saved config (p. 45):</p>
+        <pre class="cli"><code>$ docker exec -it clab-l5dc-host2 Cli
+localhost&gt;enable
+localhost# show running-config
+localhost# configure replace flash:startup-config
+host2# show hostname
+host2# show port-channel summary
+host2# ping vrf H10 10.10.10.1 repeat 3</code></pre>
+        <p>No reload was needed. The ticket meant a merge: <code>copy flash:snippet.cfg running-config</code>. If startup-config had not been saved, a checkpoint or the AVD file (<code>labs/topology/startup/host2.cfg</code> copied back in) would do the same job.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="part" id="lab-d1-bash">
+    <h3>Bash on the switch (optional)</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/36%5B%3Bvnd.vst.idref%3Dchapter-idm45591789861832%5D!/4/2/2%5Bbash_idd0020%5D" target="_blank" rel="noopener">AW Ch 12 · Bash</a> (pp. 55-57). It is not an exam objective on its own, but it ties the foundations unit together: SysDB agents are Linux processes, the CLI is a Linux program, and the EOS Linux filters in <a href="#lab-d1-cli">CLI power tools</a> work because there is a real shell underneath. It is also the basis for the on-box scripts, Event Manager actions and extensions later in the guide.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> An Arista switch is a Linux server built to be a switch, and <code>bash</code> from enable mode drops you into a real Bash shell, not an emulation (p. 55). You log in to Linux as your EOS user with an empty home directory and normal user rights, so system changes need <code>sudo</code> (p. 55). Every front-panel port appears to the kernel as a network interface, and normal tools such as <code>ifconfig</code> and <code>vmstat</code> work (p. 55). The CLI itself is a process: <code>Cli</code> from Bash starts a CLI session, and <code>Cli -c "COMMAND"</code> runs one command and prints the result, so you can pipe it into any Linux tool (p. 55). In current EOS, <code>Cli</code> points to <code>FastCli</code>, which hands the command to an agent and is fast (p. 56). The other way round, <code>bash COMMAND</code> at the EOS prompt runs one Linux command without leaving the CLI, in your home directory (p. 56). Most of the file system is rebuilt at every boot: only <code>/mnt/flash</code>, <code>/mnt/usb1</code>, <code>/mnt/drive</code> (SSD models) and <code>/persist</code> (a link into flash) survive a reload (p. 56). If you don't want junior engineers in Bash, restrict it with AAA (p. 55).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Need</th><th>Command</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>EOS version from a script</td><td><code>cat /etc/Eos-release</code></td><td>One line, easy to parse (p. 56). <code>Cli -c "show version | json"</code> is better when you need more fields.</td></tr>
+        <tr><td>Which agent started which process</td><td><code>pstree</code></td><td>Shows ProcMgr starting the agents, and ConfigAgent starting your CLI and Bash (pp. 56-57).</td></tr>
+        <tr><td>Kernel view of the ports</td><td><code>ifconfig -s</code>, <code>ip -br link</code></td><td>Front-panel ports appear as <code>et1</code>, <code>et2</code> and so on, next to internal interfaces such as <code>cpu</code>, <code>txfwd</code> and <code>vxlan</code> (p. 57).</td></tr>
+        <tr><td>Memory and CPU over time</td><td><code>vmstat 1 5</code></td><td>Five one-second samples (p. 55).</td></tr>
+        <tr><td>Run one EOS command from Bash</td><td><code>Cli -p 15 -c "show ip bgp summary"</code></td><td><code>-p 15</code> runs at privilege 15. <code>Cli --help</code> lists the other options (p. 55).</td></tr>
+        <tr><td>Run one Linux command from EOS</td><td><code>bash uname -a</code>, <code>bash pwd</code></td><td>Runs in your home directory (p. 56).</td></tr>
+        <tr><td>Storage</td><td><code>flash:</code> = <code>/mnt/flash</code>, <code>drive:</code> = <code>/mnt/drive</code></td><td>On SSD models, <code>drive:</code> keeps the <code>var_archive</code> log archives (p. 56).</td></tr>
+        <tr><td>Linux network namespace of a VRF</td><td><code>ip netns list</code>, <code>sudo ip netns exec ns-VRF ...</code></td><td>Each VRF is a kernel namespace; the <code>[netns]</code> entries in <code>pstree</code> are those (p. 57).</td></tr>
+      </tbody>
+    </table></div>
+    <aside class="note warn"><strong>Watch out.</strong> cEOS is a container, so its root file system is the container's writable layer, not a RAM disk rebuilt at boot. A <code>docker restart</code> may keep files in your home directory that a hardware switch would lose, while <code>containerlab destroy</code> and <code>deploy</code> wipe them. <code>flash:</code> survives both because containerlab maps it to a folder on the host. For a faithful persistence test, use a vEOS node in EVE-NG, where <code>reload</code> behaves like hardware.</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, enter Bash. Find out who you are, where you are, and whether you can read <code>/var/log/messages</code> with and without <code>sudo</code>. Leave Bash, then run <code>pwd</code> and <code>uname -a</code> without entering it.</p></li>
+      <li><p>From Bash on leaf1, read the EOS version from a file, show the process tree up to the first 30 lines, list the kernel interfaces with their counters, and take five one-second <code>vmstat</code> samples. Match the kernel interfaces to <code>show interfaces status</code>.</p></li>
+      <li><p>From Bash, print only the image version line of <code>show version</code>, save leaf1's running config to a file in flash with a timestamp in the name, and set the description <code>FROM-BASH</code> on <code>Loopback0</code> in a single <code>Cli</code> call. Put the original description back.</p></li>
+      <li><p>On host2 (vEOS in EVE-NG if you have it), create a test file in your home directory, in <code>/mnt/flash</code> and in <code>/persist</code>. Reload the node and see which files are still there. Find out where <code>/persist</code> really points on your release.</p></li>
+      <li><p>On host2, list the network namespaces and find the one for VRF H10. Capture five ICMP packets on its <code>vlan10</code> interface while you ping the anycast gateway from VRF H10 in a second session.</p></li>
+      <li><p>Write a small backup script in flash that saves the running config to <code>flash:backup/</code> with the hostname and a timestamp in the file name and keeps only the newest 30 files. Run it every 24 hours with the EOS <code>schedule</code> command, run it once by hand, and then remove the schedule.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · getting around, and the Linux view of the switch</summary>
+      <pre class="cli"><code>leaf1# bash
+[admin@leaf1 ~]$ whoami; id; pwd; ls -al
+[admin@leaf1 ~]$ tail -3 /var/log/messages
+[admin@leaf1 ~]$ sudo tail -3 /var/log/messages
+[admin@leaf1 ~]$ cat /etc/Eos-release
+[admin@leaf1 ~]$ pstree | head -30
+[admin@leaf1 ~]$ ifconfig -s
+[admin@leaf1 ~]$ ip -br link
+[admin@leaf1 ~]$ vmstat 1 5
+[admin@leaf1 ~]$ exit
+leaf1# bash pwd
+leaf1# bash uname -a
+leaf1# show interfaces status</code></pre>
+      <p>You are <code>admin</code> in <code>/home/admin</code>, with no superuser rights until you add <code>sudo</code> (p. 55). On hardware the ports show up as <code>et1</code>, <code>et2</code> and so on (p. 57). On cEOS you will also see the <code>eth1</code> to <code>eth5</code> veth links that containerlab created (because of <code>INTFTYPE=eth</code>); EOS maps them to Ethernet1 to Ethernet5. In <code>pstree</code>, find ProcMgr and the agents from the SysDB section (Stp, Lldp, Bgp, Sysdb), and your own <code>bash</code> under ConfigAgent (pp. 56-57).</p>
+    </details>
+    <details class="solution"><summary>Solution · Cli from Bash</summary>
+      <pre class="cli"><code>[admin@leaf1 ~]$ Cli --help
+[admin@leaf1 ~]$ Cli -c "show version" | grep -i image
+[admin@leaf1 ~]$ Cli -p 15 -c "show running-config" &gt; /mnt/flash/leaf1-$(date +%Y%m%d-%H%M).cfg
+[admin@leaf1 ~]$ ls -l /mnt/flash/*.cfg
+[admin@leaf1 ~]$ Cli -p 15 -c $'configure\ninterface Loopback0\ndescription FROM-BASH\nend'
+[admin@leaf1 ~]$ Cli -c "show running-config interfaces Loopback0"
+[admin@leaf1 ~]$ Cli -p 15 -c $'configure\ninterface Loopback0\ndescription ROUTER_ID\nend'</code></pre>
+      <p>The book saves its output to the home directory and then warns that the file will not survive a reboot (p. 56), so write anything you want to keep to <code>/mnt/flash</code>. <code>$'...'</code> is Bash syntax for a string with <code>\n</code> line breaks, which lets one <code>Cli</code> call enter several lines of configuration. Check the original Loopback0 description on leaf2 or in the AVD config before you restore it. For structured data, use <code>| json</code> and a JSON tool rather than <code>grep</code>; that is the step from here to eAPI (<a href="#lab-d7-eapi">Lab D7</a>).</p>
+    </details>
+    <details class="solution"><summary>Solution · what survives a reload (host2)</summary>
+      <pre class="cli"><code>host2# bash
+[admin@host2 ~]$ echo home &gt; ~/t-home.txt
+[admin@host2 ~]$ echo flash &gt; /mnt/flash/t-flash.txt
+[admin@host2 ~]$ ls -ld /persist /persist/*
+[admin@host2 ~]$ sudo sh -c 'echo persist &gt; /persist/local/t-persist.txt'
+[admin@host2 ~]$ exit
+host2# write memory
+host2# reload now
+! log in again after the reload
+host2# bash ls -l ~/t-home.txt /mnt/flash/t-flash.txt /persist/local/t-persist.txt</code></pre>
+      <p>On vEOS and hardware, the home file is gone and the flash and persist files remain (p. 56). The book describes <code>/persist</code> as a link to <code>/mnt/flash/persist/</code>; on newer releases it is a directory with subfolders such as <code>local</code>, <code>sys</code> and <code>secure</code>, so check with <code>ls -ld</code> and write into a subfolder that exists. On cEOS, see the warning above. Delete the test files afterwards.</p>
+    </details>
+    <details class="solution"><summary>Solution · tcpdump inside a VRF (host2)</summary>
+      <pre class="cli"><code>host2# bash ip netns list
+host2# bash sudo ip netns exec ns-H10 ip -br addr
+host2# bash sudo ip netns exec ns-H10 tcpdump -n -i vlan10 -c 5 icmp
+! in a second session
+host2# ping vrf H10 10.10.10.1 repeat 5</code></pre>
+      <pre class="out"><code>13:42:07.118 IP 10.10.10.102 &gt; 10.10.10.1: ICMP echo request, id 512, seq 1, length 80
+13:42:07.121 IP 10.10.10.1 &gt; 10.10.10.102: ICMP echo reply, id 512, seq 1, length 80</code></pre>
+      <p>Representative output. Each EOS VRF is a Linux namespace named <code>ns-VRF</code>; the default VRF is the main namespace. Without <code>ip netns exec</code>, <code>tcpdump -i vlan10</code> fails because that interface lives in the H10 namespace. EOS also has its own <code>tcpdump</code> command (try <code>tcpdump ?</code>), which saves you the namespace step for interfaces in the default VRF. On hardware, a capture on the switch sees only traffic to and from the CPU (control plane, ARP, pings to the switch), not the traffic the ASIC forwards; use a monitor session or TAP for that. On cEOS forwarding is done in software, so you may see more.</p>
+    </details>
+    <details class="solution"><summary>Solution · timestamped backup with schedule</summary>
+      <pre class="cli"><code>host2# bash
+[admin@host2 ~]$ mkdir -p /mnt/flash/backup
+[admin@host2 ~]$ cat &gt; /mnt/flash/backup.sh &lt;&lt;'SCRIPT'
+#!/bin/bash
+# Save running-config to flash with hostname and timestamp; keep the newest 30.
+d=/mnt/flash/backup
+mkdir -p "$d"
+FastCli -p 15 -c "show running-config" &gt; "$d/$(hostname)-$(date +%Y%m%d-%H%M%S).cfg"
+ls -1t "$d"/*.cfg | tail -n +31 | xargs -r rm -f
+SCRIPT
+[admin@host2 ~]$ chmod +x /mnt/flash/backup.sh
+[admin@host2 ~]$ /mnt/flash/backup.sh &amp;&amp; ls -l /mnt/flash/backup/
+[admin@host2 ~]$ exit
+host2(config)# schedule cfg-backup interval 1440 max-log-files 5 command bash /mnt/flash/backup.sh
+host2# show schedule cfg-backup
+host2(config)# no schedule cfg-backup</code></pre>
+      <p>The script and its output live in flash, so both survive a reload (p. 56). <code>schedule</code> also keeps its own gzipped log of each run under <code>flash:schedule/cfg-backup/</code>, which is where to look if the backup folder stays empty. A simpler built-in alternative is the plain scheduled <code>show running-config</code> from objective <a href="#obj-1-1">1.1</a>, task 9. Keep an eye on flash space (objective <a href="#obj-1-3">1.3</a>): 30 copies of a large config add up.</p>
+    </details>
+    <aside class="note real"><strong>Real world.</strong> On-box backups are a safety net, not a backup strategy: if the switch dies, so do they. Pull configs off the box from your Ubuntu automation server instead (the <code>arista.eos.eos_config</code> module with <code>backup: true</code>, or the AVD and CloudVision config history), and keep on-box copies for the "I just broke it and SSH still works" moment. Bash is very useful for one-off troubleshooting (namespaces, captures, <code>ss</code> and <code>netstat</code> for listening sockets, <code>top</code> for a busy agent), but anything you do there is invisible to the config and to CloudVision; if you find yourself repeating it, turn it into an Event Manager action, an alias or an extension. To keep juniors out of Bash, give them a role that denies the <code>bash</code> command (for example <code>role NO-BASH</code> with <code>10 deny mode exec command bash</code> and a final <code>permit command .*</code>; check the exact syntax with <code>?</code>) or use TACACS+ command authorization (p. 55).</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject: a colleague's cron-style backup on a vEOS or hardware switch writes <code>Cli -p 15 -c "show running-config" &gt; ~/backups/run.cfg</code> every night. After a planned reload the change board asks for last night's config.</p>
+      <p>Symptom: <code>~/backups</code> no longer exists, and the scheduled job's log shows "No such file or directory" on every run since the reload.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>The home directory is part of the file system that is rebuilt at boot, so the folder and every backup in it were lost, and the script does not recreate it (p. 56). Move the script and its output to <code>/mnt/flash</code> (or <code>/persist</code>), add <code>mkdir -p</code> to the script, and test it across one reload. Better still, collect the configs off-box from the automation server.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="part" id="lab-d1-extensions">
+    <h3>The EOS extension system</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/44%5B%3Bvnd.vst.idref%3Dchapter-idm45591788960200%5D!/4/2/2%5Bthe_eos_extension_system%5D" target="_blank" rel="noopener">AW Ch 16 · The EOS Extension System</a> (pp. 76-78) and is the last foundations part: SysDB agents, the CLI, configuration files, the Linux shell, and now how new software gets onto the switch. The graded version of this skill is in objective <a href="#obj-1-3">1.3</a> (install, persist, remove, and a broken boot-extensions break/fix); this part explains the model and adds the reload test.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> An extension (<code>.swix</code>, SoftWare Image eXtension) is one or more RPM packages zipped together with a manifest (p. 76). EOS runs on Linux but deliberately has no access to the normal package repositories, because an unplanned Linux upgrade could break EOS; the extension system is the controlled way to add packages, together with their dependencies, in one file (p. 76). Arista also ships security patches this way (pp. 76-77). The life cycle has four steps (pp. 76-77): copy the file to the <code>extension:</code> file system (a hidden <code>.extensions</code> folder on flash), install it with <code>extension NAME</code>, check <code>show extensions</code> (A or NA for available, I or NI for installed, F for forced), and make it persistent with <code>copy installed-extensions boot-extensions</code>, because the installed state does not survive a reboot on its own (p. 77). <code>boot-extensions</code> is just a text file on flash listing what to load at boot (p. 77). <code>no extension NAME</code> only uninstalls; <code>delete extension:NAME</code> removes the file (p. 77). Extensions load early in boot, so startup-config can contain commands that only exist once the extension is loaded (p. 78). Some extensions add CLI commands or aliases that appear only after you log out and back in (p. 76).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Step</th><th>Command</th><th>State after a reload</th></tr></thead>
+      <tbody>
+        <tr><td>Fetch</td><td><code>copy http://SERVER/FILE.swix extension:</code> (also <code>https:</code>, <code>scp:</code>, <code>sftp:</code>, <code>ftp:</code>, <code>tftp:</code>, <code>flash:</code>, p. 76)</td><td>The file stays on flash.</td></tr>
+        <tr><td>Install</td><td><code>extension FILE.swix</code></td><td>Lost, unless it is in boot-extensions (p. 77).</td></tr>
+        <tr><td>Persist</td><td><code>copy installed-extensions boot-extensions</code></td><td>Installed again at every boot.</td></tr>
+        <tr><td>Uninstall</td><td><code>no extension FILE.swix</code>, then copy installed-extensions boot-extensions again</td><td>Without the copy, it comes back at the next boot.</td></tr>
+        <tr><td>Remove</td><td><code>delete extension:FILE.swix</code></td><td>Gone. A stale line may stay in boot-extensions (p. 77).</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p>On the Ubuntu automation server, put an extension file in nginx's web root (a TerminAttr <code>.swix</code> from Arista Software Downloads is the realistic choice). On leaf1, copy it straight from the server into <code>extension:</code> over HTTP, install it, and read <code>show extensions</code> before and after the install.</p></li>
+      <li><p>Without updating boot-extensions, reload the node and check <code>show extensions</code> again. Then install it again, make it persistent, look at the boot-extensions file in EOS and in Bash, reload once more and check.</p></li>
+      <li><p>Remove the extension completely: uninstall, delete the file, and leave boot-extensions in the state a careless engineer would. Read <code>show boot-extensions</code> and the file in Bash, and clean up the stale entry.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · fetch and install from the Ubuntu server</summary>
+      <pre class="cli"><code>$ sudo mkdir -p /var/www/html/swix
+$ sudo cp TerminAttr-1.35.0-1.swix /var/www/html/swix/
+
+leaf1# show extensions
+leaf1# copy http://172.100.100.5/swix/TerminAttr-1.35.0-1.swix extension:
+leaf1# dir extension:
+leaf1# show extensions
+leaf1# extension TerminAttr-1.35.0-1.swix
+leaf1# show extensions
+leaf1# show extensions detail</code></pre>
+      <p>Use the address of your automation server and the file name you downloaded. Before the install, the status shows <code>A, NI</code>; afterwards <code>A, I</code>, and the last column counts the RPMs inside (pp. 76-77). On containerlab, if leaf1 cannot reach 172.100.100.5, copy the file in with <code>docker cp</code> to <code>/mnt/flash/</code> and use <code>copy flash:FILE extension:</code>. If the install is refused because of signature checking, see the note in the objective 1.3 solution. Without an Arista account, the steps are the same with any <code>.swix</code> your team builds; Arista's open-source <code>swi-tools</code> can package an RPM as a <code>.swix</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · the reload test</summary>
+      <pre class="cli"><code>leaf1# write memory
+leaf1# reload now
+leaf1# show extensions
+! A, NI: the file is there but no longer installed
+
+leaf1# extension TerminAttr-1.35.0-1.swix
+leaf1# copy installed-extensions boot-extensions
+leaf1# show boot-extensions
+leaf1# more flash:boot-extensions
+leaf1# bash cat /mnt/flash/boot-extensions
+leaf1# reload now
+leaf1# show extensions
+! A, I: installed again at boot</code></pre>
+      <p>Installation is a run-time state, so it is lost on reload unless the extension is listed in boot-extensions (p. 77). On cEOS, <code>reload</code> restarts EOS inside the container and should show the same behavior; if your cEOS release does not, repeat the test on a vEOS node, which reloads like hardware. On a chassis with two supervisors, the file must be on both (p. 76).</p>
+    </details>
+    <details class="solution"><summary>Solution · removal and the stale boot-extensions line</summary>
+      <pre class="cli"><code>leaf1# no extension TerminAttr-1.35.0-1.swix
+leaf1# delete extension:TerminAttr-1.35.0-1.swix
+leaf1# show extensions
+leaf1# show boot-extensions
+! still lists TerminAttr-1.35.0-1.swix
+
+! the clean fix: rewrite the list from what is installed now
+leaf1# copy installed-extensions boot-extensions
+leaf1# show boot-extensions
+
+! or edit the file in Bash
+leaf1# bash sudo sed -i '/TerminAttr-1.35.0-1.swix/d' /mnt/flash/boot-extensions</code></pre>
+      <p>There is no <code>delete boot-extensions</code> command; the book's author ended up removing the entry from the file in Bash (p. 77). Running <code>copy installed-extensions boot-extensions</code> after every change avoids the problem, because it rewrites the whole list from the current state. A stale entry makes EOS try to load a missing file at every boot and log an error, which is the break/fix in objective <a href="#obj-1-3">1.3</a>.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Three words to remember: copy, install, persist. A task that says "install the extension so that it survives a reload" is only complete when <code>show boot-extensions</code> lists it, and a removal is only complete when it does not.</aside>
+    <aside class="note real"><strong>Real world.</strong> In production, extensions are mostly security patches, bug-fix hotfixes and agents such as TerminAttr; patches for Arista security advisories are often shipped as extensions, so check the advisory for a <code>.swix</code> before you plan a full upgrade (p. 77). Keep the files on an internal server, roll them out with CloudVision image bundles or Ansible (copy, install, persist, verify with <code>show extensions</code>), and remove a hotfix once you upgrade to a release that includes the fix. Large operators go further and write their own agents with the EOS SDK, shipped as extensions (p. 78).</aside>
   </section>
 
   <section class="part" id="obj-1-2">
     <h3><span class="obj">1.2</span> EOS upgrades: standard, SSU, MLAG ISSU, chassis, CLI and CloudVision</h3>
-    <p>Change window: upgrade POD_A (leaf1 and leaf2) to a new EOS release with no host outage. host1 is dual-homed with an LACP port-channel, so one leaf at a time can be out of service. You will run the real procedure up to the reload. cEOS cannot boot a <code>.swi</code> image, so the reload step uses a container image swap as the analog.</p>
+    <p>Change window: upgrade POD_A (leaf1 and leaf2) to a new EOS release with no host outage. host1 is dual-homed with an LACP port-channel, so one leaf at a time can be out of service. You will run the real procedure up to the reload. cEOS cannot boot a <code>.swi</code> image, so the reload step uses a container image swap as the analog. The basic image steps follow AW Ch 10 (pp. 51-52); to do a real reload into a new image, use <a href="#lab-d1-upgrade-veos">A real image upgrade on vEOS</a> after this objective.</p>
 
     <table class="grid">
       <thead><tr><th>Method</th><th>What it does</th><th>Traffic impact</th><th>When</th></tr></thead>
@@ -930,6 +1315,59 @@ leaf2# write memory</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d1-upgrade-veos">
+    <h3>A real image upgrade on vEOS</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/32%5B%3Bvnd.vst.idref%3Dchapter-idm45591789973048%5D!/4/2/2%5Bupgrading_eos%5D" target="_blank" rel="noopener">AW Ch 10 · Upgrading EOS</a> (pp. 51-52). Objective 1.2 practices the MLAG-safe procedure on cEOS, which cannot boot a <code>.swi</code>. Here you do the part cEOS cannot: copy an image, point boot-config at it and reload into the new release, on a vEOS node in EVE-NG. Use <code>ztp1</code> or any vEOS node outside the fabric, and download a second vEOS-lab <code>.swi</code> release from Arista (newer or older than the one you run; both directions work the same way).</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> An upgrade is three steps: get the image onto the switch, tell the switch to boot it, reload (p. 51). <code>show version</code> gives the release; <code>show version detail</code> adds every installed package with its version and the firmware components such as Aboot, which is mostly useful to TAC (p. 51). The letter in the release name shows its life-cycle stage: F for a feature release, M for a maintenance release (p. 51). <code>dir ?</code> lists the file systems, including <code>drive:</code> on SSD models and <code>usb1:</code> when a USB stick is inserted (p. 51). EOS does not boot the first image it finds; <code>boot system</code> chooses it (p. 51). That command does not change running-config: it writes <code>SWI=</code> in <code>flash:boot-config</code>, which is why <code>show running-config | include boot</code> shows it as a comment and why <code>reload</code> does not ask you to save after it (pp. 51-52). <code>show boot</code> reads boot-config (p. 52). Without boot-config, Aboot has no image to load and stops at its prompt; current EOS warns you at <code>reload</code> instead (p. 52). Some upgrades also update FPGA firmware, which adds minutes and sometimes extra reboots; do not power off during it (p. 52).</aside>
+    <ol class="tasks">
+      <li><p>On the vEOS node, record <code>show version</code> and <code>show version detail</code> (just the first page and the components at the end), <code>dir ?</code>, <code>dir flash:</code>, <code>show boot</code> and <code>show running-config | include boot</code>. Explain why the boot line is a comment.</p></li>
+      <li><p>Put the second <code>.swi</code> on the Ubuntu automation server's web root. Copy it to flash over HTTP, check free space first, and verify its checksum against the value on Arista's download page.</p></li>
+      <li><p>Point the next boot at the new image and check <code>show boot</code> and <code>dir flash:</code> (look at boot-config's time stamp). Reload, and note whether EOS asks you to save. After the reload, confirm the new release.</p></li>
+      <li><p>Go back to the original release the same way. Keep both images on flash when you are done.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · before the upgrade</summary>
+      <pre class="cli"><code>ztp1# show version
+ztp1# show version detail | no-more
+ztp1# show version detail | begin Component
+ztp1# dir ?
+ztp1# dir flash:
+ztp1# show boot
+ztp1# show running-config | include boot</code></pre>
+      <pre class="out"><code>! boot system flash:/vEOS-lab.swi</code></pre>
+      <p>Representative output. The line begins with <code>!</code> because it is not running-config; EOS only shows what boot-config says (pp. 51-52). On a hardware switch, <code>show inventory</code> tells you whether an SSD is fitted (and so whether <code>drive:</code> exists), and the model name itself encodes airflow, memory and port types (p. 51). The packages in <code>show version detail</code> are the RPMs that make up EOS, the same format that <a href="#lab-d1-extensions">extensions</a> use.</p>
+    </details>
+    <details class="solution"><summary>Solution · copy, verify, boot system, reload</summary>
+      <pre class="cli"><code>$ sudo mkdir -p /var/www/html/images
+$ sudo cp vEOS-lab-4.35.0F.swi /var/www/html/images/
+$ sha512sum /var/www/html/images/vEOS-lab-4.35.0F.swi
+
+ztp1# dir flash: | include bytes
+ztp1# copy http://172.100.100.5/images/vEOS-lab-4.35.0F.swi flash:
+ztp1# verify /sha512 flash:vEOS-lab-4.35.0F.swi
+ztp1(config)# boot system flash:vEOS-lab-4.35.0F.swi
+ztp1# show boot
+ztp1# dir flash:
+ztp1# reload
+! no "save?" prompt if nothing else changed: boot system did not touch running-config
+ztp1# show version</code></pre>
+      <p>Use the real file names and compare the checksum with the one Arista publishes for that file; check <code>verify ?</code> for the hash types your release offers (<code>/md5</code>, <code>/sha512</code>). <code>copy</code> also accepts <code>https:</code>, <code>scp:</code>, <code>sftp:</code>, <code>ftp:</code> and <code>tftp:</code> sources (p. 51). Tab completion saves typing the file name (p. 51). After <code>boot system</code>, the boot-config time stamp in <code>dir flash:</code> changes and <code>show boot</code> names the new image (p. 52). The first boot of a new release takes longer than a normal reload; on hardware, watch the console for FPGA messages and let them finish (p. 52). For MLAG pairs, wrap these steps in the drain and ISSU checks of objective <a href="#obj-1-2">1.2</a> (AW Ch 18).</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> If a task says "make the switch boot release X", the graded state is <code>show boot</code>, not running-config, and <code>write memory</code> alone does not change it. Check that the file named in <code>SWI=</code> exists in <code>dir flash:</code> before you leave the task.</aside>
+    <aside class="note real"><strong>Real world.</strong> Copy images from an internal server, verify the checksum every time (a truncated copy is the classic failed upgrade), and keep exactly two images on flash. Choose releases with Arista's life-cycle policy in mind: M releases for production, F releases only when you need a new feature (p. 51). For more than a handful of switches, let CloudVision image bundles or your Ansible playbooks do the copy, verify, <code>boot system</code> and reload, with the post-checks in the same run (p. 52).</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (on the vEOS node): <code>delete flash:boot-config</code>, then <code>reload</code>.</p>
+      <p>Symptom: current EOS stops you with a warning that the boot image is not set or not present and asks whether you really want to reload. On older releases, or if you confirm anyway, the node stops at an <code>Aboot#</code> prompt with a message that no SWI is specified in <code>/mnt/flash/boot-config</code>.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>Without boot-config, Aboot does not know which image to load (p. 52). If you are still in EOS, answer no and run <code>boot system flash:FILE</code>, then <code>show boot</code> (p. 52). If you are already in Aboot, boot the image by hand and fix boot-config from EOS:</p>
+        <pre class="cli"><code>Aboot# ls /mnt/flash
+Aboot# boot /mnt/flash/vEOS-lab.swi
+ztp1(config)# boot system flash:vEOS-lab.swi
+ztp1# show boot</code></pre>
+        <p>Or create the file in Aboot with <code>echo SWI=flash:vEOS-lab.swi &gt; /mnt/flash/boot-config</code> and <code>reboot</code>. More Aboot recovery: <a href="#lab-d1-aboot">Aboot hands-on</a>. On hardware, a switch sitting in Aboot also runs its fans at full speed until you fix it (p. 52).</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="obj-1-3">
     <h3><span class="obj">1.3</span> EOS extensions, Aboot recovery, flash and memory health</h3>
     <p>Operations wants a streaming agent extension installed on every leaf so it survives reboots, a documented password-recovery procedure, and a monthly health check of storage and memory.</p>
@@ -1009,8 +1447,8 @@ leaf1# delete flash:EOS-4.34.3M.swi</code></pre>
     <table class="grid">
       <thead><tr><th>Situation</th><th>Aboot procedure (concept)</th></tr></thead>
       <tbody>
-        <tr><td>Enter Aboot</td><td>Console access, reboot, press Ctrl-C when prompted ("Press Control-C now to enter Aboot shell"). If an Aboot password is set (<code>aboot password</code> in EOS config, shown in <code>show boot-config</code>), you need it.</td></tr>
-        <tr><td>Lost admin password</td><td>In the Aboot shell: <code>cd /mnt/flash</code>, rename <code>startup-config</code> (for example <code>mv startup-config startup-config.old</code>), <code>boot</code> or reboot. EOS boots with an empty config. Log in as <code>admin</code> without a password, copy the old file back into running config, fix the user, <code>write memory</code>.</td></tr>
+        <tr><td>Enter Aboot</td><td>Console access, reboot, press Ctrl-C when prompted ("Press Control-C now to enter Aboot shell"). If an Aboot password is set (<code>boot secret</code> in EOS config, shown in <code>show boot</code>), you need it. Hands-on steps on vEOS: <a href="#lab-d1-aboot">Aboot hands-on</a>.</td></tr>
+        <tr><td>Lost admin password</td><td>In the Aboot shell: <code>cd /mnt/flash</code>, rename <code>startup-config</code> (for example <code>mv startup-config startup-config.old</code>), <code>boot</code> or reboot. EOS boots with an empty config and starts ZTP (<code>zerotouch cancel</code>). Log in as <code>admin</code> without a password, copy the old file back into running config, fix the user, <code>write memory</code>.</td></tr>
         <tr><td>Image will not boot</td><td>In Aboot: <code>ls /mnt/flash</code> to find another <code>.swi</code>, edit <code>boot-config</code> (<code>SWI=flash:EOS-old.swi</code>) or run <code>boot flash:EOS-old.swi</code>. Keep the previous image on flash until the new one is proven.</td></tr>
         <tr><td>Factory recovery</td><td><code>fullrecover</code> in Aboot restores the factory image and erases flash. Last resort; you lose configs and images.</td></tr>
         <tr><td>Boot loops into ZTP</td><td>No startup-config means ZTP. <code>zerotouch cancel</code> for this boot, <code>zerotouch disable</code> to stop it permanently (this reloads).</td></tr>
@@ -1025,6 +1463,141 @@ leaf1# delete flash:EOS-4.34.3M.swi</code></pre>
       <p>Symptom: flash free space dropped by 500 MB with nothing obvious in <code>dir flash:</code>; <code>show boot-extensions</code> lists an extension that <code>show extensions</code> does not know. After a reboot the log reports a boot extension that could not be installed.</p>
       <details class="solution"><summary>Root cause and fix</summary>
         <p>Hidden files do not show in a plain <code>dir</code>. Use <code>dir /all flash:</code> (shows hidden files) or <code>bash sudo du -ah /mnt/flash | sort -h | tail</code> to find the big file and delete it (<code>delete flash:.hidden-dump.bin</code>). For boot extensions, rebuild the list from what is really installed: <code>copy installed-extensions boot-extensions</code>, then check <code>show boot-extensions</code>. On cEOS do not fill flash completely: it is your host disk.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="part" id="lab-d1-aboot">
+    <h3>Aboot hands-on (vEOS only)</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/40%5B%3Bvnd.vst.idref%3Dchapter-idm45591789701256%5D!/4/2/2%5Baboot%5D" target="_blank" rel="noopener">AW Ch 14 · Aboot</a> (pp. 63-67) and turns the Aboot table in objective <a href="#obj-1-3">1.3</a> into real practice. <strong>cEOS has no bootloader</strong>, so everything here needs a vEOS node in EVE-NG with console access. Use the spare node <code>ztp1</code> from the <a href="#lab-d2-ztp">ZTP lab</a> (or any vEOS node that is not part of the fabric), and before you start, export its config or note how to wipe it in EVE-NG, because some steps erase it.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Aboot is the second-stage bootloader that loads EOS (p. 63). It reads <code>/mnt/flash/boot-config</code> to find the image, and halts at an <code>Aboot#</code> prompt if boot-config is missing or corrupt, if the image is missing or corrupt, or if someone presses Ctrl-C on the console at the "Press Control-C now to enter Aboot shell" message (p. 63). Aboot is a tiny Linux built on BusyBox, so <code>ls</code>, <code>cd</code>, <code>more</code>, <code>vi</code>, <code>cp</code>, <code>wget</code>, <code>scp</code> and <code>ifconfig</code> work, plus Aboot's own <code>boot</code>, <code>swiinfo</code>, <code>recover</code>, <code>netconf</code>, <code>udhcpc</code> and <code>showtech</code> (p. 63). <code>flash:</code> is an EOS name; in Aboot you go to <code>/mnt/flash</code>, and anything outside flash, such as your home directory, does not exist there (p. 64). The ASIC driver is not loaded, so the only network port Aboot can use is the management port, <code>ma1</code> (pp. 64, 66). On a switch in Aboot the fans run at full speed (p. 63).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>boot-config line</th><th>Meaning</th><th>Set it from</th></tr></thead>
+      <tbody>
+        <tr><td><code>SWI=</code></td><td>The image to boot: <code>flash:</code>, <code>/mnt/flash/</code>, <code>usb1:</code>, or a network URL with <code>http://</code>, <code>ftp://</code> (with optional <code>user:pass@</code>), <code>tftp://</code> or <code>nfs://</code> (p. 64)</td><td>EOS <code>boot system</code>, Aboot or Bash</td></tr>
+        <tr><td><code>CONSOLESPEED=</code></td><td>Console speed: 1200 to 38400, default 9600 (p. 64)</td><td>EOS <code>boot console speed</code></td></tr>
+        <tr><td><code>PASSWORD=</code></td><td>Aboot shell password, stored as a SHA-512 hash (p. 65)</td><td>EOS <code>boot secret</code> only; never type it in by hand (p. 65)</td></tr>
+        <tr><td><code>NETDEV=</code>, <code>NETAUTO=</code>, <code>NETIP=</code>, <code>NETMASK=</code>, <code>NETGW=</code>, <code>NETDOMAIN=</code>, <code>NETDNS=</code></td><td>Aboot's own network settings, used to fetch a network image: device (<code>ma1</code>), <code>dhcp</code> or static, dotted-decimal mask only, IPv4 only (p. 66)</td><td>Aboot or Bash only; EOS cannot set them (p. 66)</td></tr>
+      </tbody>
+    </table></div>
+    <aside class="note warn"><strong>Watch out.</strong> On vEOS, some Aboot features behave differently from a hardware switch: the management device name, the recovery partition behind <code>fullrecover</code>, and the FPGA steps do not exist on a VM. Treat vEOS as the place to learn the shell and the boot-config file, and check anything you plan to do on hardware against the platform's documentation. Know your EVE-NG console well: Ctrl-C must reach the node, so use the console window, not SSH.</aside>
+    <ol class="tasks">
+      <li><p>From EOS on <code>ztp1</code>, read the boot-config three ways: <code>show boot</code>, <code>more flash:boot-config</code> and <code>bash cat /mnt/flash/boot-config</code>. Note the image name. Then reload, press Ctrl-C at the Aboot prompt, and explore: <code>help</code>, <code>pwd</code>, <code>ls -al</code>, <code>cd /mnt/flash</code>, <code>more boot-config</code>, <code>swiinfo</code> on the image, <code>ifconfig -a</code>. Boot EOS from the prompt.</p></li>
+      <li><p>Set an Aboot password <code>LabAboot1</code> from EOS, check how it appears in <code>show boot</code>, and test it at the Aboot prompt, including a wrong password three times (but do not accept what Aboot offers). Then remove it.</p></li>
+      <li><p>Password recovery: on <code>ztp1</code>, add a user <code>admin</code> with a password you then "forget" (type a random one), save, and log out. Recover access through Aboot twice: once by commenting out the <code>username</code> lines, once by renaming startup-config. Explain what happens to ZTP the second time and get back to the original config.</p></li>
+      <li><p>Network boot: copy the vEOS image from <code>ztp1</code> to the Ubuntu server's web root, then set boot-config so Aboot boots the image over HTTP from 172.100.100.5 using a static management address. Reboot without touching the keyboard, and confirm in <code>show version</code> and <code>show boot</code> where it booted from. Put boot-config back to flash.</p></li>
+      <li><p>Manual network fetch: in Aboot, give <code>ma1</code> an address yourself and download a file from the Ubuntu server with <code>wget</code>, the way you would pull an image onto a switch whose flash was wiped.</p></li>
+      <li><p>Lab only: read the <code>fullrecover</code> solution. If you want to see it, run it on <code>ztp1</code> and rebuild the node afterwards (or wipe it in EVE-NG).</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · exploring Aboot</summary>
+      <pre class="cli"><code>ztp1# show boot
+ztp1# more flash:boot-config
+ztp1# reload now
+! console: press Ctrl-C at "Press Control-C now to enter Aboot shell"
+Aboot# help
+Aboot# pwd
+Aboot# ls -al
+Aboot# cd /mnt/flash
+Aboot# ls -l
+Aboot# more boot-config
+Aboot# swiinfo vEOS-lab.swi
+Aboot# ifconfig -a
+Aboot# boot /mnt/flash/vEOS-lab.swi</code></pre>
+      <p>Use your image name from <code>show boot</code>. <code>pwd</code> shows <code>/</code>, not flash, and <code>/mnt</code> holds the mounted file systems (<code>flash</code>, and <code>drive</code> on SSD models) and their config files (p. 63-64). <code>ifconfig -a</code> lists only the loopback and the management port, because front-panel ports need the ASIC driver that EOS loads later (p. 64). <code>boot</code> with a path starts that image directly without changing boot-config, which is the quickest way out of Aboot when boot-config is wrong.</p>
+    </details>
+    <details class="solution"><summary>Solution · Aboot password (boot secret)</summary>
+      <pre class="cli"><code>ztp1(config)# boot secret LabAboot1
+ztp1# show boot
+! Aboot password (encrypted): $6$... (SHA-512 hash)
+ztp1# reload now
+! Ctrl-C at the prompt
+Aboot password:
+! three wrong entries end with an offer to run fullrecover; just press Enter to reboot
+! enter the right password to get Aboot#
+Aboot# boot /mnt/flash/vEOS-lab.swi
+ztp1(config)# no boot secret
+ztp1# show boot</code></pre>
+      <p>The password is stored as a hash in <code>PASSWORD=</code> in boot-config, so set and remove it only through <code>boot secret</code> (p. 65). Older releases used MD5; current ones use SHA-512 (p. 65). After three wrong passwords, Aboot offers <code>fullrecover</code>, and that is the only way in if both the Aboot and EOS passwords are lost (p. 65). Pressing Enter just reboots. Removing the <code>PASSWORD=</code> line from boot-config in Bash also clears it (p. 65). Real world: set a boot secret on switches in shared or unattended spaces, keep it in your password vault with the EOS credentials, and remember it does nothing against someone who is allowed to run <code>fullrecover</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · password recovery, two ways</summary>
+      <pre class="cli"><code>! way 1: comment out the users (the book's method)
+Aboot# cd /mnt/flash
+Aboot# cp startup-config startup-config.orig
+Aboot# vi startup-config
+! put "!" in front of every line that starts with "username" and save (:wq)
+!   or, without vi: sed -i 's/^username/!username/' startup-config
+Aboot# reboot
+! log in as admin with no password
+ztp1# configure
+ztp1(config)# username admin privilege 15 role network-admin secret NewPass123
+ztp1(config)# end
+ztp1# write memory
+
+! way 2: rename startup-config
+Aboot# cd /mnt/flash
+Aboot# mv startup-config startup-config.bak
+Aboot# reboot
+! EOS boots with no startup-config, so ZTP starts
+localhost# zerotouch cancel
+! reloads; log in as admin, no password
+localhost# copy flash:startup-config.bak running-config
+ztp1(config)# username admin privilege 15 role network-admin secret NewPass123
+ztp1# write memory
+ztp1# delete flash:startup-config.bak</code></pre>
+      <p>Both work the same way on every Arista switch, because the procedure is just "find startup-config in <code>/mnt/flash</code> and edit it" (p. 67). With no <code>username</code> lines left, <code>admin</code> logs in on the console without a password (p. 67). Renaming the file leaves the switch with no startup-config, so it boots into ZTP (p. 67); cancel ZTP, then merge the old file back with <code>copy</code>, not <code>configure replace</code>, so you can fix the user before anything else (see the <a href="#lab-d1-cfgmgmt">merge vs replace traps</a>). If your release uses <code>aaa root</code> or other local accounts, check those lines too. Keep a copy of the original file until you have logged in with the new password.</p>
+    </details>
+    <details class="solution"><summary>Solution · booting an image over HTTP</summary>
+      <pre class="cli"><code>ztp1# bash scp /mnt/flash/vEOS-lab.swi admin@172.100.100.5:/tmp/
+$ sudo mkdir -p /var/www/html/images &amp;&amp; sudo mv /tmp/vEOS-lab.swi /var/www/html/images/
+
+ztp1# bash sudo cp /mnt/flash/boot-config /mnt/flash/boot-config.flash
+ztp1# bash sudo vi /mnt/flash/boot-config</code></pre>
+      <pre class="cli"><code>SWI=http://172.100.100.5/images/vEOS-lab.swi
+NETDEV=ma1
+NETIP=172.100.100.52
+NETMASK=255.255.255.0
+NETGW=172.100.100.1</code></pre>
+      <pre class="cli"><code>ztp1# reload now
+! do NOT press Ctrl-C: let Aboot bring up ma1 and fetch the image
+ztp1# show version
+ztp1# show boot
+$ tail /var/log/nginx/access.log
+
+ztp1# bash sudo cp /mnt/flash/boot-config.flash /mnt/flash/boot-config
+ztp1# show boot</code></pre>
+      <p>The NET lines can only be written from Bash or Aboot (p. 66). The mask must be dotted decimal, and only IPv4 is supported (p. 66); use <code>NETAUTO=dhcp</code> instead of the static lines if your ZTP DHCP server has a reservation for this MAC. The book's lesson from about 90 failed tries: if you press Ctrl-C at the Aboot prompt, Aboot stops before it applies the NET settings, so <code>ma1</code> has no address; let it boot on its own (p. 66). For TFTP, install <code>tftpd-hpa</code> on the Ubuntu server, put the image in <code>/srv/tftp</code>, and use <code>SWI=tftp://172.100.100.5/vEOS-lab.swi</code>. On vEOS the management device in Aboot may not be called <code>ma1</code>; check with <code>ifconfig -a</code> in task 1. Network boot is handy for labs and for a switch with failing flash, but every reload now depends on the server, so do not leave it that way.</p>
+    </details>
+    <details class="solution"><summary>Solution · manual fetch with wget</summary>
+      <pre class="cli"><code>Aboot# cd /mnt/flash
+Aboot# ifconfig ma1 172.100.100.52 netmask 255.255.255.0
+Aboot# ifconfig ma1
+Aboot# wget http://172.100.100.5/images/vEOS-lab.swi -O test.swi
+Aboot# swiinfo test.swi
+Aboot# rm test.swi
+Aboot# boot /mnt/flash/vEOS-lab.swi</code></pre>
+      <p>Always give the <code>netmask</code>: without it, <code>ifconfig</code> uses the old classful mask (a /16 for 172.100.x.x, a /8 for 10.x.x.x), which quietly breaks routing to anything off-link (p. 66). <code>udhcpc -i ma1</code> gets an address by DHCP instead. Check free space with <code>df -h /mnt/flash</code> before downloading an image. After the download, set <code>SWI=</code> in boot-config to the new file with <code>vi</code>, or boot it once with <code>boot</code> and fix boot-config from EOS with <code>boot system flash:FILE</code> (p. 66).</p>
+    </details>
+    <details class="solution"><summary>Solution · fullrecover (lab only, last resort)</summary>
+      <pre class="cli"><code>Aboot# fullrecover
+! prompts: type "yes" and press Enter to erase /mnt/flash, or just Enter to cancel</code></pre>
+      <p><code>fullrecover</code> erases everything on <code>/mnt/flash</code> and writes back the factory recovery data: all <code>.swi</code> files, boot-config, startup-config, <code>zerotouch-config</code>, schedule logs and some console logs, and everything under <code>/mnt/flash/persist</code> (p. 65). The switch comes back on the factory EOS release with no config, which on hardware can be several releases older, and the boot can include FPGA updates with several reboots taking 10 minutes or more on some models (p. 65). It is the way to rescue a switch with lost Aboot and EOS passwords without sending it back (p. 65), and the book's author used it once on a switch that could no longer cancel or disable ZTP or take any config (p. 67). On vEOS there may be no recovery data to restore, so the node may simply stop at Aboot with an empty flash; wipe it in EVE-NG to start over. Never run it on a switch you cannot rebuild, and save configs off-box first.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> The procedure questions are short: Ctrl-C at the Aboot prompt on the console, <code>cd /mnt/flash</code>, then either fix <code>boot-config</code> (<code>SWI=</code>) or move or edit <code>startup-config</code>. Know that <code>boot system</code> writes <code>SWI=</code>, <code>boot secret</code> writes the Aboot password, <code>show boot</code> reads it all, and <code>fullrecover</code> wipes flash.</aside>
+    <aside class="note real"><strong>Real world.</strong> Every one of these needs a console. Make sure every rack has a console server with working cabling and that its access is documented before you need it; Aboot work in a data center is otherwise a 2 a.m. drive. Before an upgrade, keep the old image on flash and check <code>show boot</code> points at the new one, and after a flash clean-up, run <code>show boot</code> again. If you change <code>CONSOLESPEED</code>, update the console server port too, or the next person sees only garbage.</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (on <code>ztp1</code>): a colleague frees flash space by renaming the image, then reloads: <code>bash sudo mv /mnt/flash/vEOS-lab.swi /mnt/flash/old-image.bak</code>, <code>reload now</code>. (Use your image name.)</p>
+      <p>Symptom: the node never reaches EOS; the console stops at an <code>Aboot#</code> prompt after an error about the image.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>boot-config still says <code>SWI=flash:vEOS-lab.swi</code>, which no longer exists, so Aboot halts (p. 63). Fix it from the prompt:</p>
+        <pre class="cli"><code>Aboot# cd /mnt/flash
+Aboot# more boot-config
+Aboot# ls -l
+Aboot# swiinfo old-image.bak
+Aboot# mv old-image.bak vEOS-lab.swi
+Aboot# reboot
+! or: boot /mnt/flash/old-image.bak, then fix it in EOS with "boot system flash:FILE"
+ztp1# show boot</code></pre>
+        <p>Lesson: run <code>show boot</code> before deleting or renaming any <code>.swi</code>, and never remove the running image or the previous one (see the flash clean-up in objective <a href="#obj-1-3">1.3</a>).</p>
       </details>
     </div>
   </section>
@@ -1129,12 +1702,17 @@ switch(config-vm-LABVM)# no enable</code></pre>
     <ul class="checklist">
       <li>I can stage a change in a session, show its diff from inside and outside the session, and commit it with a timer that I then confirm.</li>
       <li>I can save a named checkpoint and return to it with <code>configure replace checkpoint:NAME</code>, and I know that replace removes anything not in the file.</li>
+      <li>I can use ranges with <code>$</code>, <code>{start,end,step,pad}</code> expansion, <code>show active</code>, <code>| section</code>, <code>| nz</code>, Linux filters and aliases, and I know why two stacked <code>| include</code> filters mislead.</li>
+      <li>I know that only <code>copy</code> merges, that checkpoint restore and session commit are replaces, and that a session commit removes direct edits made after the session started. I can recover a wiped switch from the console with <code>configure replace flash:startup-config</code>.</li>
       <li>I can explain how agents use SysDB, show that killing the Stp agent causes no reconvergence while turning STP off and on does, and say why <code>configure replace</code> beats a SysDB restart for loading a new config.</li>
+      <li>I can use Bash on the switch: <code>Cli -c</code> into Linux tools, <code>bash</code> one-liners, captures inside a VRF namespace, and I know only flash, drive, USB and <code>/persist</code> survive a reload.</li>
+      <li>On vEOS I can copy an image over HTTP, verify it, set <code>boot system</code>, check <code>show boot</code>, reload into it, and recover from a deleted boot-config.</li>
       <li>I can explain standard upgrade vs SSU vs MLAG ISSU vs chassis SSO and when each applies.</li>
       <li>I can drain a leaf with maintenance mode, verify the drain from a spine, and bring it back.</li>
       <li>I can install an extension persistently and clean it up again.</li>
       <li>I can find what is filling flash and check CPU and memory per process.</li>
-      <li>I can describe password recovery and image recovery from Aboot.</li>
+      <li>I can describe password recovery and image recovery from Aboot, and on vEOS I have fixed a bad <code>SWI=</code>, set and removed <code>boot secret</code>, recovered a password, and booted an image over HTTP with the NET settings.</li>
+      <li>I can fetch an extension from a server, install it, prove it is lost on reload without boot-extensions, persist it, and remove it without leaving a stale entry.</li>
       <li>No session is pending, no unit is in maintenance, and <code>show running-config diffs</code> is empty on every switch I touched.</li>
     </ul>
   </section>
@@ -1397,52 +1975,165 @@ banner login</code></pre>
   </section>
 
   <section class="part" id="lab-d2-ztp">
-    <h3>ZTP and ZTR: concept and commands</h3>
-    <p>A switch with no startup-config boots into Zero Touch Provisioning: it sends DHCP on its management and front-panel ports, and the DHCP answer tells it where to fetch a boot script. CloudVision uses this to onboard new switches (the script is CVP's bootstrap) and to replace failed ones (ZTR: the replacement inherits the failed device's configlets and image).</p>
+    <h3>Zero Touch Provisioning: build it on EVE-NG</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/38%5B%3Bvnd.vst.idref%3Dchapter-idm45591789811160%5D!/4/2/2%5Bzero-touch_provisioning%5D" target="_blank" rel="noopener">AW Ch 13 · Zero-Touch Provisioning</a> (pp. 58-61). ZTP is how CloudVision onboards every new switch and replaces failed ones (ZTR), so the D2 questions about onboarding make much more sense once you have built the pieces yourself. You need a vEOS node in EVE-NG and your Ubuntu automation server; cEOS in containerlab always gets a startup-config, so it never enters ZTP.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> A fixed-configuration switch with no startup-config, or a zero-byte one, boots into ZTP (p. 58). It puts every Ethernet and management port into routed mode (<code>no switchport</code>) and sends DHCP on every connected port, retrying forever (p. 58). Anything you configure meanwhile is thrown away on the next retry, and current EOS refuses to save it ("Cannot copy to startup-config when ZeroTouch is enabled", p. 58). You need three things: a DHCP server, a web server for the file, and a connected port (p. 58). The DHCP answer gives an address and a bootfile URL (option 67); the switch downloads that file (p. 59). If the file's first line is a shebang (<code>#!</code> and an interpreter path), it runs as a script; otherwise it is saved as startup-config. Either way, the switch reloads afterwards (pp. 60-61). <code>zerotouch cancel</code> skips ZTP for one boot only: it writes a one-time flag to boot-config, reloads at once without asking, and the ZTP banner stays in the config (pp. 59-60). <code>zerotouch disable</code> stops it for good by writing <code>DISABLE=True</code> to <code>flash:zerotouch-config</code>, and also reloads at once (p. 59). Once disabled, <code>zerotouch enable</code> is refused at the CLI; delete <code>flash:zerotouch-config</code> and boot with an empty startup-config to bring ZTP back (p. 60).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Command or file</th><th>Effect</th><th>Survives the next reload</th></tr></thead>
+      <tbody>
+        <tr><td><code>zerotouch cancel</code></td><td>Skip ZTP and reload now (p. 59)</td><td>No. Erase startup-config and reload, and ZTP is back (p. 59).</td></tr>
+        <tr><td><code>zerotouch disable</code></td><td>Turn ZTP off and reload now (p. 59)</td><td>Yes, through <code>flash:zerotouch-config</code> (p. 59).</td></tr>
+        <tr><td><code>zerotouch script-exec-timeout</code></td><td>How long a downloaded script may run (p. 59)</td><td>Yes</td></tr>
+        <tr><td><code>delete flash:zerotouch-config</code></td><td>Removes the disable flag (p. 60)</td><td>ZTP runs at the next boot with no startup-config.</td></tr>
+        <tr><td>Bootfile without <code>#!</code></td><td>Saved as startup-config, then reload (p. 60)</td><td>It is the new startup-config.</td></tr>
+        <tr><td>Bootfile with <code>#!/usr/bin/Cli</code>, <code>#!/bin/bash</code> or <code>#!/usr/bin/env python3</code></td><td>Run as a script, then reload (pp. 60-61)</td><td>Only what the script wrote to flash or boot-config. Running-config changes are lost in the reload (p. 61).</td></tr>
+      </tbody>
+    </table></div>
+
+    <h4 id="lab-d2-ztp-build">Build the ZTP lab</h4>
+    <p>Add one vEOS node called <code>ztp1</code> to your EVE-NG lab and connect only its first port (Management1) to the management network the automation server is on (172.100.100.5, see <a href="#setup-eveng">Running this lab on EVE-NG</a>). Leave its other ports unconnected so DHCP goes out of one port only. Before you start, check whether anything else on that segment already serves DHCP; if it does, use a separate EVE-NG network that only the Ubuntu server and <code>ztp1</code> share.</p>
     <ol class="tasks">
-      <li><p>On any lab switch check the ZTP state. cEOS in containerlab ships with ZTP disabled because containerlab provides a startup config.</p></li>
-      <li><p>Write (in your notes) a DHCP reservation for a new leaf that hands out 172.100.100.25 and a bootfile URL, and a minimal ZTP script that sets the hostname, management IP and TerminAttr.</p></li>
-      <li><p>Optional: add a node <code>leaf5</code> to a copy of the topology without a <code>startup-config</code>, run a DHCP server container on the management network, and watch ZTP request the script (<code>show zerotouch</code>, <code>show logging | include ZTP</code>). How containerlab disables ZTP on cEOS can change between versions; check the containerlab cEOS page.</p></li>
+      <li><p>Start <code>ztp1</code> and watch its console. Write down the ZTP log lines, the ports it tries, and the MAC address of Management1 (<code>show interfaces Management1</code>). Then type <code>hostname TEST</code>, try <code>write memory</code>, and see what happens at the next retry.</p></li>
+      <li><p>On the Ubuntu server, install a DHCP server and nginx. Give <code>ztp1</code> a reservation for 172.100.100.51 with a bootfile URL, and serve only known clients.</p></li>
+      <li><p>Serve a plain startup-config as the bootfile (no shebang): hostname <code>ztp1</code>, the admin user, a static Management1 address and default route, and eAPI. Let the node ZTP, and confirm it came up with that config and that you can SSH to it.</p></li>
+      <li><p>Wipe <code>ztp1</code> (<code>write erase</code>, <code>reload now</code>). Change the bootfile to a Cli script that copies the startup-config from the web server and sets the boot image. Watch the script run, and explain why it needs no <code>write memory</code>.</p></li>
+      <li><p>Stretch: replace the script with a Bash script that picks the config file by the switch's system MAC address, so one bootfile URL serves every new switch.</p></li>
+      <li><p>Compare cancel and disable: on <code>ztp1</code> with an empty startup-config, run <code>zerotouch cancel</code>, then erase and reload again. Then run <code>zerotouch disable</code>, erase and reload. Bring ZTP back.</p></li>
     </ol>
-    <div class="verify"><p class="label">Verify</p>
-      <pre class="cli"><code>leaf1# show zerotouch</code></pre>
-      <pre class="out"><code>ZeroTouch Mode
---------------
-Disabled</code></pre>
-    </div>
-    <details class="solution"><summary>Solution · ZTP pieces</summary>
-      <pre class="cli"><code>! EOS commands
-switch# show zerotouch
-switch# zerotouch cancel        ! stop ZTP for this boot (switch reloads to normal EOS)
-switch(config)# zerotouch disable   ! stop permanently; saves and reloads
-switch(config)# zerotouch enable    ! re-enable for the next boot without startup-config</code></pre>
-      <pre class="cli"><code># ISC dhcpd snippet on the management network
+    <details class="solution"><summary>Solution · what a switch in ZTP looks like</summary>
+      <pre class="out"><code>localhost ZeroTouch: %ZTP-5-INIT: No startup-config found, starting Zero Touch Provisioning
+localhost ZeroTouch: %ZTP-5-DHCP_QUERY: Sending DHCP request on [ Management1 ]
+localhost ZeroTouch: %ZTP-5-DHCP_QUERY_FAIL: Failed to get a valid DHCP response
+localhost ZeroTouch: %ZTP-5-RETRY: Retrying Zero Touch Provisioning from the beginning (attempt 2)</code></pre>
+      <p>Representative output. The switch lists only connected ports (p. 58). <code>hostname TEST</code> works until the next retry puts everything back to defaults, and <code>write memory</code> is refused while ZTP is on (p. 58). That is the classic first-day surprise the chapter describes; the console banner explains it, but nobody reads it (p. 58).</p>
+    </details>
+    <details class="solution"><summary>Solution · DHCP and web server on the Ubuntu automation server</summary>
+      <pre class="cli"><code>$ sudo apt install isc-dhcp-server nginx
+$ sudo mkdir -p /var/www/html/ztp
+$ ip -br addr     # find the NIC that has 172.100.100.5
+$ sudo sed -i 's/^INTERFACESv4=.*/INTERFACESv4="ens19"/' /etc/default/isc-dhcp-server</code></pre>
+      <pre class="cli"><code># /etc/dhcp/dhcpd.conf
+authoritative;
+deny unknown-clients;
 subnet 172.100.100.0 netmask 255.255.255.0 {
   option routers 172.100.100.1;
-  host leaf5 {
-    hardware ethernet 00:1c:73:aa:bb:05;     # Management0 MAC (or use option 61 client-id)
-    fixed-address 172.100.100.25;
-    option bootfile-name "http://172.100.100.250/ztp/leaf5.sh";   # DHCP option 67
+  option domain-name-servers 172.100.100.1;
+  host ztp1 {
+    hardware ethernet 50:00:00:aa:bb:01;      # Management1 MAC of ztp1
+    fixed-address 172.100.100.51;
+    option bootfile-name "http://172.100.100.5/ztp/ztp1";   # option 67
   }
 }</code></pre>
+      <pre class="cli"><code>$ sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf      # syntax check
+$ sudo systemctl restart isc-dhcp-server
+$ journalctl -u isc-dhcp-server -f</code></pre>
+      <p>Use your own NIC name and ztp1's real MAC. <code>deny unknown-clients</code> means the server answers only reserved MACs, so it cannot hand addresses to anything else on the segment. The book uses a dynamic pool with <code>option bootfile-name</code>, which is fine on an isolated network (p. 60). ISC dhcpd is end-of-life but still packaged; on newer servers Kea is its replacement. The same reservation in Kea's <code>kea-dhcp4.conf</code> is a <code>reservations</code> entry with <code>"hw-address"</code>, <code>"ip-address"</code> and <code>"boot-file-name": "http://172.100.100.5/ztp/ztp1"</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · bootfile 1: a plain startup-config</summary>
+      <pre class="cli"><code># /var/www/html/ztp/ztp1   (no shebang, so EOS saves it as startup-config)
+hostname ztp1
+username admin privilege 15 role network-admin secret LabPass123
+!
+interface Management1
+   ip address 172.100.100.51/24
+!
+ip route 0.0.0.0/0 172.100.100.1
+!
+management api http-commands
+   no shutdown
+!
+end</code></pre>
+      <pre class="out"><code>localhost ConfigAgent: %ZTP-6-DHCP_SUCCESS: DHCP response received on Management1 [ Ip Address: 172.100.100.51/24; Boot File: http://172.100.100.5/ztp/ztp1 ]
+localhost ConfigAgent: %ZTP-6-CONFIG_DOWNLOAD: Attempting to download the startup-config from http://172.100.100.5/ztp/ztp1
+localhost ConfigAgent: %ZTP-6-CONFIG_DOWNLOAD_SUCCESS: Successfully downloaded config from http://172.100.100.5/ztp/ztp1
+localhost ConfigAgent: %ZTP-6-RELOAD: Rebooting the system</code></pre>
+      <pre class="cli"><code>$ tail /var/log/nginx/access.log
+$ ssh admin@172.100.100.51
+ztp1# show running-config | include hostname|Management1
+ztp1# show zerotouch</code></pre>
+      <p>Representative log lines. The switch saved the file as its startup-config and reloaded with it (p. 60). The nginx access log shows the download with status 200, which is the first place to look when a switch says the download failed. Keep the secret out of files you commit; on a real network use a hashed <code>secret sha512</code> value.</p>
+    </details>
+    <details class="solution"><summary>Solution · bootfile 2: a Cli script</summary>
+      <pre class="cli"><code># /var/www/html/ztp/ztp1-startup.cfg   (the config from bootfile 1, renamed)
+# /var/www/html/ztp/ztp1   (now a script)
+#!/usr/bin/Cli -p2
+enable
+copy http://172.100.100.5/ztp/ztp1-startup.cfg flash:startup-config
+! optional: stage an image and point boot-config at it
+! copy http://172.100.100.5/ztp/vEOS64-lab-4.34.2F.swi flash:
+! configure
+! boot system flash:vEOS64-lab-4.34.2F.swi</code></pre>
+      <pre class="out"><code>localhost ConfigAgent: %ZTP-6-CONFIG_DOWNLOAD_SUCCESS: Successfully downloaded config script from http://172.100.100.5/ztp/ztp1
+localhost ConfigAgent: %ZTP-6-EXEC_SCRIPT: Executing the downloaded config script
+localhost ConfigAgent: %ZTP-6-EXEC_SCRIPT_SUCCESS: Successfully executed the downloaded config script
+localhost ConfigAgent: %ZTP-6-RELOAD: Rebooting the system</code></pre>
+      <p>Representative output. The script copies the real config straight into <code>flash:startup-config</code> and the boot image into <code>boot-config</code>; both are files on flash, and ZTP reloads at the end, so the switch boots from them (pp. 60-61). A <code>write memory</code> at the end would save the running-config, which is still the empty ZTP config, over the file you just copied. This is the answer to the book's "no <code>wr mem</code>?" puzzle (p. 61). The same idea explains why setting the hostname in the script's running-config does nothing: put the hostname in the copied file. Upgrading in the same pass is how 50 switches arrive on the right config and the right EOS release with nobody on site (p. 61). On vEOS, image staging works but is slow; skip it unless you want to test it.</p>
+    </details>
+    <details class="solution"><summary>Solution · stretch: one script for every switch</summary>
+      <pre class="cli"><code>#!/bin/bash
+# ZTP bootfile: fetch the startup-config named after this switch's system MAC.
+SERVER=http://172.100.100.5/ztp
+MAC=$(FastCli -p 15 -c "show version" | awk '/System MAC address/ {print $4}' | tr -d '.:')
+FastCli -p 15 -c "copy $SERVER/configs/$MAC.cfg flash:startup-config" || exit 1</code></pre>
+      <p>Save the per-switch files as <code>/var/www/html/ztp/configs/&lt;mac&gt;.cfg</code>, for example <code>5000aabb0000.cfg</code> (check the format your node prints). Hardware switches usually key on serial number instead (<code>show version | json</code>, <code>serialNumber</code>); vEOS often has no serial. The book mentions customers who archive every switch's config daily and point ZTP at the archive, so a replacement switch rebuilds itself from the failed one's last config, and its author's training-lab script picks the config from which management-switch port the new switch sees in <code>show lldp neighbors</code> (p. 61). Arista's open-source <code>ztpserver</code> packages the same ideas without CloudVision (p. 61).</p>
+    </details>
+    <details class="solution"><summary>Solution · cancel vs disable, and bringing ZTP back</summary>
+      <pre class="cli"><code>localhost# zerotouch cancel
+! reloads at once, no confirmation; boots without ZTP this time only
+localhost# bash cat /mnt/flash/boot-config
+localhost# write erase
+localhost# reload now
+! ZTP starts again
+
+localhost# zerotouch disable
+! reloads at once; ZTP is now off for good
+localhost# more flash:zerotouch-config
+localhost# configure
+localhost(config)# zerotouch enable
+! refused: ZeroTouch can not be enabled interactively
+localhost# delete flash:zerotouch-config
+localhost# write erase
+localhost# reload now
+! ZTP starts again</code></pre>
+      <p>After a cancel, boot-config may briefly hold a one-time flag such as <code>disable=once</code> or <code>disable=nextReload</code>, depending on the release; it is removed at boot, which is why ZTP returns next time (p. 60). <code>zerotouch-config</code> contains <code>DISABLE=True</code>; the book suggests deleting it rather than editing it (p. 60). The book's discovery story is a good habit for any EOS mystery: the feature had to be controlled by a file somewhere, and <code>dir flash:</code> found it (p. 60).</p>
+    </details>
+
+    <h4 id="lab-d2-ztp-cv">ZTP with CloudVision, and in your EVPN VXLAN 101 lab</h4>
+    <p>CloudVision is a ZTP server: you point option 67 at CloudVision's bootstrap URL (for example <code>http://&lt;cvp&gt;/ztp/bootstrap</code>), and its script installs TerminAttr so the switch registers and starts streaming. CloudVision can run its own DHCP server, or you keep yours and only change the bootfile URL (p. 61). The new switch then appears waiting to be provisioned: in the Undefined container under Network Provisioning, or in the Inventory and Topology Studio on newer releases. From there you move it into a container, attach configlets and an image bundle, and CloudVision pushes the config with the session and <code>rollback clean-config</code> method from <a href="#lab-d1-cfgmgmt">the configuration management traps</a>. ZTR is the same flow for a failed switch: the replacement ZTPs, and you tell CloudVision which old device it replaces, so it inherits the old device's configlets and image.</p>
+    <p>In the <a href="#lab-d2-evpn101">EVPN VXLAN 101 lab</a>, look for these pieces: run <code>show zerotouch</code> and <code>show running-config section TerminAttr</code> on a device and note the <code>-cvaddr</code> it streams to; check whether any device sits in the Undefined container or in a "pending onboarding" state; and if the lab lets you, run <code>write erase</code> and <code>reload</code> on one device and watch it come back through ZTP into CloudVision. Write down the order of steps, because it is a likely D2 question.</p>
+    <details class="solution"><summary>Solution · a hand-written TerminAttr bootstrap (what CloudVision's script does for you)</summary>
       <pre class="cli"><code>#!/usr/bin/Cli -p2
 enable
 configure
 hostname leaf5
-interface Management0
+interface Management1
    ip address 172.100.100.25/24
 ip route 0.0.0.0/0 172.100.100.1
-username admin privilege 15 role network-admin secret admin
+username admin privilege 15 role network-admin secret LabPass123
 management api http-commands
    no shutdown
 daemon TerminAttr
    exec /usr/bin/TerminAttr -cvaddr=192.0.2.10:9910 -cvauth=token,/tmp/token -cvvrf=default -taillogs
    no shutdown
 end
-write memory</code></pre>
-      <p>With CloudVision the bootfile is CVP's bootstrap URL (for example <code>http://&lt;cvp&gt;/ztp/bootstrap</code>); the device then appears in the Undefined container (Network Provisioning) or in the Inventory and Topology Studio waiting to be provisioned. For ZTR, the replacement device ZTPs, and in CloudVision you choose to replace the old device with the new serial number; CV applies the old device's configlets and image to it.</p>
+copy running-config startup-config</code></pre>
+      <p>This is the one case where a script ends with a save: it builds the config in running-config (including TerminAttr and the onboarding token), so it must save it before ZTP reloads. Compare with bootfile 2, which copies a finished file to startup-config and must not save. Check whether your release still refuses saves during ZTP when the save comes from the ZTP script itself; CloudVision's own bootstrap handles this for you.</p>
     </details>
-    <aside class="note exam"><strong>Exam tip.</strong> Know the flow in order: no startup-config, DHCP request, option 67 bootfile URL, script download and execution, reload or apply. And know how to get out of it on a lab box: <code>zerotouch cancel</code>.</aside>
+
+    <aside class="note exam"><strong>Exam tip.</strong> Know the chain in order: no (or empty) startup-config, every connected port goes routed, DHCP on all of them, option 67 bootfile URL, download, script or startup-config chosen by the shebang, reload. Know cancel (one boot) vs disable (<code>flash:zerotouch-config</code>, permanent), and that both reload without asking. For CloudVision: bootfile URL to CloudVision, TerminAttr, the device appears for provisioning, then containers or Studios push the config.</aside>
+    <aside class="note real"><strong>Real world.</strong> ZTP is only as good as its inputs. Keep the per-switch configs generated (AVD from the same inventory you use for the fabric), keep the DHCP reservations next to them in Git, and use <code>deny unknown-clients</code> or a dedicated provisioning VLAN so a switch never picks up the wrong file. Plan the management network first: ZTP needs DHCP and HTTP reachability on day 0, before any routing is configured. If a lab box keeps falling into ZTP, cancel it, configure it and save; don't disable ZTP on production gear you will later want to rebuild remotely.</aside>
+    <div class="breakfix"><p class="label">Break / fix · three ZTP failures</p>
+      <p>Inject one at a time on <code>ztp1</code>, then <code>write erase</code> and <code>reload now</code>:</p>
+      <ol>
+        <li>Leave <code>flash:zerotouch-config</code> in place from the disable task.</li>
+        <li>On the server, remove the first line (<code>#!/usr/bin/Cli -p2</code>) from the bootfile 2 script.</li>
+        <li>On the server, change one character of ztp1's MAC in <code>dhcpd.conf</code> and restart the service.</li>
+      </ol>
+      <p>Symptoms: (1) the switch boots straight to a login prompt with the hostname <code>localhost</code> and no ZTP messages. (2) The download succeeds and the switch reloads, but it comes up as <code>localhost</code> with no management address, and <code>show startup-config</code> contains the script's lines. (3) The console shows <code>ZTP-5-DHCP_QUERY_FAIL</code> and <code>RETRY</code> over and over.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>(1) ZTP is disabled by <code>DISABLE=True</code> in <code>flash:zerotouch-config</code>; an empty startup-config is not enough on its own (pp. 59-60). Delete the file and reload. (2) Without the shebang, EOS saved the script as a startup-config (p. 60); lines such as <code>enable</code> and <code>copy http://...</code> are not configuration, so they were rejected and nothing useful was applied. Put the shebang back as the very first line. The same failure happens when the file was edited on Windows and has CRLF line endings (the interpreter path then ends in an invisible carriage return) or starts with a blank line; check with <code>head -1 FILE | od -c</code> and fix with <code>dos2unix</code>. (3) The reservation no longer matches, and <code>deny unknown-clients</code> tells the server to ignore the switch. Confirm on the server with <code>journalctl -u isc-dhcp-server</code> (a "no free leases" or "unknown client" line) and <code>sudo tcpdump -ni ens19 port 67 or port 68</code>: you see the DISCOVER and no OFFER. Other causes of the same symptom: the server is listening on the wrong NIC (<code>INTERFACESv4</code>), the EVE-NG link is not connected, or another DHCP server answers first. A 404 in <code>/var/log/nginx/access.log</code> with <code>ZTP-6-CONFIG_DOWNLOAD_FAIL</code> on the switch means DHCP worked and the file path is wrong.</p>
+      </details>
+    </div>
   </section>
 
   <section class="part" id="obj-2-3">
@@ -1533,6 +2224,7 @@ VNI         VLAN       Source       Interface       802.1Q Tag
       <li>I can build containers, apply configlets and a configlet builder, run a change control with snapshots, and roll it back.</li>
       <li>I can tell reconcile from pushing the designed config and choose correctly.</li>
       <li>I know what an image bundle does and how ZTP and ZTR onboard and replace devices.</li>
+      <li>I can build ZTP on EVE-NG with DHCP option 67 and nginx, serve a startup-config and a script bootfile, explain cancel vs disable, and fix a missing shebang, a stale <code>zerotouch-config</code> and a DHCP server that does not answer.</li>
       <li>I can create a workspace, tag devices, use the Static Configuration Studio, review, submit and execute.</li>
       <li>Path B: I can diff designed vs running and remediate drift with a session-based replace.</li>
     </ul>
