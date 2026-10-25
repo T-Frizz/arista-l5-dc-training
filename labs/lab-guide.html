@@ -3039,6 +3039,80 @@ ping: local error: message too long, mtu=1500</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d4-aristacisms">
+    <h3>Aristacisms: EOS habits that catch other-vendor engineers</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/78%5B%3Bvnd.vst.idref%3Dchapter-idm45591784974328%5D!/4/2/2%5Baristacisms%5D" target="_blank" rel="noopener">AW Ch 33 · Aristacisms</a> (pp. 188-193). The chapter collects EOS behaviors that differ from what a Cisco-trained engineer expects. Several of them make good exam traps because the config looks right at a glance. Three of them are tickets T11 to T13 in the <a href="#cap-3">C3 ticket queue</a>.</p>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Behavior</th><th>What EOS does</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td>Speed and duplex</td><td>There is no <code>duplex</code> command. Pasted IOS lines like <code>speed 1000</code> and <code>duplex full</code> are rejected (p. 188).</td><td>Use <code>speed forced 1000full</code> (or <code>speed auto</code>); check <code>speed ?</code> and <code>speed forced ?</code> for what the port supports.</td></tr>
+        <tr><td>Comments in config</td><td>EOS keeps comments inside the config, attached to the section they were typed in. A pasted line that loses its line break can turn the next <code>interface</code> line into a comment, silently merging two interfaces' settings (p. 188).</td><td>Check what you pasted with <code>show running-config interfaces</code>. Avoid pasting big blocks over a slow console; use <code>configure replace</code> or a session instead.</td></tr>
+        <tr><td>Protocols start shut down</td><td>Some routing processes (the book shows RIP) are created in a <code>shutdown</code> state (p. 188).</td><td>Read the section with <code>show active</code> inside the router mode, then <code>no shutdown</code>.</td></tr>
+        <tr><td>Trunk groups</td><td>Once a VLAN has a <code>trunk group</code>, it is carried only on trunks that list that group. <code>switchport trunk allowed vlan</code> is not enough, yet <code>show interfaces trunk</code> still lists the VLAN as allowed (pp. 188-190).</td><td>Look at "allowed and active in management domain" in <code>show interfaces trunk</code>, and at <code>show vlan trunk group</code>.</td></tr>
+        <tr><td>VRF on an interface</td><td>Assigning, changing or removing an interface's VRF deletes its IP address, with only a one-line notice (p. 190).</td><td>Set the VRF first, then the address. After any VRF change, check <code>show ip interface brief vrf all</code>.</td></tr>
+        <tr><td>Routing per VRF</td><td>Every VRF needs its own <code>ip routing vrf NAME</code>; without it, <code>show ip route vrf NAME</code> ends with "IP routing not enabled" (p. 191).</td><td>Add <code>ip routing vrf NAME</code> whenever you create a VRF that routes.</td></tr>
+        <tr><td>VRF keyword position</td><td>The VRF goes right after the command: <code>ping vrf MGMT 10.0.0.1</code>, <code>ip name-server vrf MGMT ...</code>, not at the end as on IOS (p. 192).</td><td>Build the habit; <code>?</code> after the command shows where <code>vrf</code> goes.</td></tr>
+        <tr><td>Management services in one VRF</td><td>Some services, such as DNS name servers, can live in only one VRF at a time. Adding one in a second VRF is refused until you remove the first (p. 192).</td><td>Remove the old entries, then configure them with <code>vrf NAME</code>.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="fine">The book creates VRFs with <code>vrf definition</code> and an <code>rd</code>, and notes that route leaking was only just arriving (p. 190). Current EOS uses <code>vrf instance NAME</code>, needs no RD for a plain VRF, and supports leaking between VRFs. RDs and route targets matter only when the VRF is carried in BGP, as TENANT-A is in Lab D6.</p>
+    <ol class="tasks">
+      <li><p>On leaf1 <code>Ethernet5</code>, try <code>duplex full</code>, then look at <code>speed ?</code> and <code>speed forced ?</code>. Do not apply a speed: this port carries host1's traffic. (cEOS only creates the Ethernet ports that are wired in the topology, so there is no spare port to experiment on.)</p></li>
+      <li><p>Create VLANs 40 and 41 with trunk group <code>LAB</code> and allow them on host-facing <code>Port-Channel5</code> with <code>switchport trunk allowed vlan add 40-41</code>. Show that they are listed as allowed but not active. Make them active the EOS way, then remove everything you added.</p></li>
+      <li><p>Create VRF <code>LAB</code> and <code>Loopback99</code> with 192.0.2.1/32. Then put the loopback in VRF LAB and note what happens to the address. Make <code>ping vrf LAB 192.0.2.1</code> work, look at <code>show ip route vrf LAB</code> before and after enabling routing in the VRF, and clean up.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · speed</summary>
+      <pre class="cli"><code>leaf1(config)# interface Ethernet5
+leaf1(config-if-Et5)# duplex full
+% Invalid input
+leaf1(config-if-Et5)# speed ?
+leaf1(config-if-Et5)# speed forced ?
+! on hardware: speed forced 1000full, and "no speed" to go back to the default</code></pre>
+      <p>On hardware, <code>speed forced</code> turns off autonegotiation and fixes both speed and duplex in one command (p. 188). cEOS ports are software interfaces, so the list of offered speeds is short; the point is to learn the syntax.</p>
+    </details>
+    <details class="solution"><summary>Solution · trunk groups</summary>
+      <pre class="cli"><code>leaf1(config)# vlan 40-41
+leaf1(config-vlan-40-41)# trunk group LAB
+leaf1(config)# interface Port-Channel5
+leaf1(config-if-Po5)# switchport trunk allowed vlan add 40-41
+leaf1# show interfaces trunk
+leaf1# show vlan 40-41
+leaf1# show vlan trunk group
+
+leaf1(config)# interface Port-Channel5
+leaf1(config-if-Po5)# switchport trunk group LAB
+leaf1# show vlan 40-41
+
+! clean up
+leaf1(config)# interface Port-Channel5
+leaf1(config-if-Po5)# no switchport trunk group LAB
+leaf1(config-if-Po5)# switchport trunk allowed vlan remove 40-41
+leaf1(config)# no vlan 40-41</code></pre>
+      <p>Before the trunk group is on the port, <code>show interfaces trunk</code> lists 40-41 under "Vlans allowed" but not under "Vlans allowed and active in management domain", and <code>show vlan</code> shows no ports for them (p. 190). That is exactly how the MLAG peer VLAN is kept off every trunk except the peer link (trunk group <code>MLAG</code>, Lab D4 and AW Ch 18). A VLAN can belong to several trunk groups (p. 190). Do not use trunk groups as a shortcut for a VLAN list; once a VLAN has a group, it can never be carried on a trunk without that group (p. 190).</p>
+    </details>
+    <details class="solution"><summary>Solution · VRF on an interface</summary>
+      <pre class="cli"><code>leaf1(config)# vrf instance LAB
+leaf1(config)# interface Loopback99
+leaf1(config-if-Lo99)# ip address 192.0.2.1/32
+leaf1(config-if-Lo99)# vrf LAB
+! Interface Loopback99 IP address 192.0.2.1 removed due to enabling VRF LAB
+leaf1(config-if-Lo99)# ip address 192.0.2.1/32
+leaf1# show ip route vrf LAB
+! ... ! IP routing not enabled
+leaf1(config)# ip routing vrf LAB
+leaf1# show ip route vrf LAB
+leaf1# ping vrf LAB 192.0.2.1
+
+! clean up
+leaf1(config)# no interface Loopback99
+leaf1(config)# no ip routing vrf LAB
+leaf1(config)# no vrf instance LAB</code></pre>
+      <p>The notice appears once and is easy to miss in a pasted block (p. 190). The connected route shows up even before routing is enabled, but the VRF does not route until <code>ip routing vrf LAB</code> is present (p. 191). In this fabric, AVD always renders <code>vrf</code> before <code>ip address</code> on SVIs and adds <code>ip routing vrf TENANT-A</code>, which is one reason generated configs avoid these traps.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> When a VLAN "should" be on a trunk and is not, check three things in this order: <code>show interfaces trunk</code> (allowed and active), <code>show vlan trunk group</code>, and on an MLAG pair, whether both peers agree. When a tenant subnet stops routing after a "small VRF fix", run <code>show ip interface brief vrf all</code> and <code>show running-config | include ip routing</code> before you touch BGP.</aside>
+    <aside class="note real"><strong>Real world.</strong> Most of these bite during migrations, when configs are copied from another vendor. Convert configs with a template or AVD rather than pasting them, and diff the result. The book also mentions some fun hidden commands (<code>show donkeys</code>, <code>show chickens</code>, <code>show farm</code>, p. 192); they are harmless, but don't leave them in scripts.</aside>
+  </section>
+
   <section class="part checkpoint">
     <h3>Checkpoint · Lab D4</h3>
     <ul class="checklist">
@@ -5854,7 +5928,7 @@ $ DOCKER="sudo docker" ./inject-faults.sh 3
 $ ./inject-faults.sh random 3        # three unknown tickets, numbers saved in .injected
 $ ./inject-faults.sh all             # hard mode: every fault at once
 $ ./inject-faults.sh restore         # configure replace back to the AVD intended config</code></pre>
-    <p>Acceptance for each ticket: you name the root cause in one sentence, fix it with the smallest correct change, and prove the fix with the verification listed (plus a clean ANTA run at the end). Target: 15 minutes per ticket, 2.5 hours for all ten one by one, then a final run with <code>all</code>.</p>
+    <p>Acceptance for each ticket: you name the root cause in one sentence, fix it with the smallest correct change, and prove the fix with the verification listed (plus a clean ANTA run at the end). Target: 15 minutes per ticket, about 3 hours for all 13 one by one, then a final run with <code>all</code>.</p>
 
     <h4>Method (use it on every ticket)</h4>
     <ol>
@@ -5878,6 +5952,9 @@ $ ./inject-faults.sh restore         # configure replace back to the AVD intende
         <tr><td>T8</td><td>Compliance audit: leaf3 advertises EVPN type-1 and type-4 routes. POD_B is supposed to be MLAG-only. Remove the drift and explain the risk.</td></tr>
         <tr><td>T9</td><td>Monitoring: leaf2 Port-Channel5 / Ethernet5 is err-disabled. host1 is running on one link.</td></tr>
         <tr><td>T10</td><td>NOC: spine1 and spine2 each lost one underlay BGP neighbor and one EVPN neighbor. Users report no impact yet.</td></tr>
+        <tr><td>T11</td><td>DB team: some DB flows from host1 (10.20.20.101) fail and others work. VLAN 10 is fine. The on-call engineer says <code>show interfaces trunk</code> on leaf1 lists VLAN 20 as allowed on Port-Channel5.</td></tr>
+        <tr><td>T12</td><td>App team: hosts on POD_B can reach other hosts in their own VLAN, but nothing routed, in any subnet. A change on leaf3 and leaf4 last night was about "tidying up the routing config".</td></tr>
+        <tr><td>T13</td><td>App team: about half of host2's off-subnet traffic in VLAN 10 fails. A colleague "fixed the VRF" on leaf4 Vlan10 this morning; the running config still shows <code>vrf TENANT-A</code> on it.</td></tr>
       </tbody>
     </table>
 
@@ -6021,6 +6098,34 @@ leaf4(config-if-Et1-2)# no shutdown</code></pre>
       <p>Proof: spines show leaf4's underlay and EVPN peers Established; <code>leaf4# show ip route 10.255.0.1</code> is via Ethernet1 again (not via Vlan4093). Ask who shut the ports and why (<code>show logging</code>, AAA accounting): an unexplained shutdown is a process issue as well as a config one.</p>
     </details>
 
+    <details class="solution"><summary>T11 · root cause, fix, proof</summary>
+      <pre class="cli"><code>leaf1# show interfaces trunk
+leaf1# show vlan 20
+leaf1# show vlan trunk group
+leaf2# show vlan trunk group</code></pre>
+      <p>Root cause: VLAN 20 on leaf1 was given <code>trunk group DB-ONLY</code>. From then on it is carried only on trunks that list that group, so leaf1 prunes it from Port-Channel5 and from the peer link, even though <code>switchport trunk allowed vlan 10,20,30</code> is unchanged. <code>show interfaces trunk</code> lists VLAN 20 as allowed but not as "allowed and active"; <code>show vlan 20</code> on leaf1 shows no ports. Flows that host1 hashes to leaf2 still work, which is why only some fail (AW Ch 33, pp. 188-190).</p>
+      <pre class="cli"><code>leaf1(config)# vlan 20
+leaf1(config-vlan-20)# no trunk group DB-ONLY</code></pre>
+      <p>Proof: <code>show vlan 20</code> on leaf1 lists Po5, Po10 and Vx1 again, and a long <code>ping vrf H20 10.20.20.102</code> from host1 has no loss. Compare <code>show vlan trunk group</code> on both MLAG peers whenever one VLAN misbehaves on one peer only.</p>
+    </details>
+    <details class="solution"><summary>T12 · root cause, fix, proof</summary>
+      <pre class="cli"><code>leaf3# show ip route vrf TENANT-A
+leaf3# show running-config | include ip routing
+leaf3# show bgp evpn route-type ip-prefix ipv4</code></pre>
+      <p>Root cause: <code>ip routing vrf TENANT-A</code> was removed on leaf3 and leaf4. <code>show ip route vrf TENANT-A</code> ends with "IP routing not enabled", so the anycast gateways on POD_B may still answer ARP but do not route, and POD_B stops importing routed (type-5 and host) routes into the VRF. Bridged traffic in the same VLAN, including over VXLAN, still works. In EOS every VRF needs its own routing statement (AW Ch 33, p. 191).</p>
+      <pre class="cli"><code>leaf3(config)# ip routing vrf TENANT-A
+leaf4(config)# ip routing vrf TENANT-A</code></pre>
+      <p>Proof: <code>show ip route vrf TENANT-A</code> on leaf3 shows the connected SVIs, the type-5 routes from POD_A and the default route from core1; <code>host2# ping vrf H20 10.10.10.101</code> works.</p>
+    </details>
+    <details class="solution"><summary>T13 · root cause, fix, proof</summary>
+      <pre class="cli"><code>leaf4# show ip interface brief vrf all | include Vlan10
+leaf4# show running-config interfaces Vlan10
+leaf3# show running-config interfaces Vlan10</code></pre>
+      <p>Root cause: the VRF on leaf4 Vlan10 was removed and set again. EOS deletes an interface's IP addresses whenever its VRF changes, so Vlan10 on leaf4 is in TENANT-A but has no <code>ip address virtual 10.10.10.1/24</code>. host2's flows that hash to leaf4 have no gateway, the ones that hash to leaf3 work. The running config "looks right" if you only check the VRF line (AW Ch 33, p. 190).</p>
+      <pre class="cli"><code>leaf4(config)# interface Vlan10
+leaf4(config-if-Vl10)# ip address virtual 10.10.10.1/24</code></pre>
+      <p>Proof: the two peers' <code>show running-config interfaces Vlan10</code> match, <code>show ip interface brief vrf all</code> lists Vlan10 with 10.10.10.1/24 on leaf4, and a long ping from host2 VRF H10 to 10.20.20.101 has no loss. If <code>no vrf</code> is rejected on your release, inject the same fault by changing the VRF to another one and back.</p>
+    </details>
     <aside class="note real"><strong>Real world.</strong> Write each solved ticket up in three lines: symptom, root cause, fix plus proof. A queue of those notes is the best revision material for the Operations exam and the start of your team's runbook. C5 has an incident report template.</aside>
     <aside class="note warn"><strong>Watch out.</strong> With <code>all</code>, faults mask each other (T7 hides T3 and T4 completely; T1 changes what T9 looks like). Fix in path order: physical and MLAG first, then underlay, then overlay, then services, and re-test after each fix.</aside>
   </section>
@@ -6365,7 +6470,7 @@ leaf1# show management api gnmi</code></pre>
     <ul class="checklist">
       <li>C1: I built the full fabric from the brief inside 4 hours and scored 85 or more with the grader.</li>
       <li>C2: hosts reach 8.8.8.8 through the border, also with one border link down; TENANT-B is isolated, and I can argue for a leaking design.</li>
-      <li>C3: I solved all ten tickets one by one, then <code>all</code> at once, each with a one-sentence root cause and a proof.</li>
+      <li>C3: I solved all 13 tickets one by one, then <code>all</code> at once, each with a one-sentence root cause and a proof.</li>
       <li>C4: I reloaded an MLAG leaf with no more than 2 lost pings and attached a clean snapshot diff and ANTA report.</li>
       <li>C5: my event handler, scheduler, SNMP and gNMI subscriptions all fired on a real event, and I wrote an incident report.</li>
     </ul>

@@ -20,7 +20,7 @@ hints and answers are in `labs/lab-guide.html`, section **Capstone C3**.
 
 ```
 cd labs/capstone
-./inject-faults.sh list          # the ten complaints, no answers
+./inject-faults.sh list          # the 13 complaints, no answers
 ./inject-faults.sh 3             # one ticket
 ./inject-faults.sh 2 5 9         # several tickets
 ./inject-faults.sh random 3      # three random tickets (numbers saved in .injected)
@@ -79,3 +79,6 @@ the collapsed answers in the lab guide; avoid reading either until you have trie
 | 8 | EVPN ethernet segment (ESI) |
 | 9 | Spanning tree |
 | 10 | Interface state |
+| 11 | Trunk groups (EOS-specific) |
+| 12 | Per-VRF IP routing (EOS-specific) |
+| 13 | SVI address lost on a VRF change (EOS-specific) |

@@ -7,7 +7,7 @@
 #   ./inject-faults.sh list          show the tickets (complaints only, no answers)
 #   ./inject-faults.sh 3             inject ticket 3
 #   ./inject-faults.sh 1 4 7         inject several tickets
-#   ./inject-faults.sh all           inject all 10 tickets
+#   ./inject-faults.sh all           inject all 13 tickets
 #   ./inject-faults.sh random [N]    inject N random tickets (default 3); the numbers are
 #                                    saved in .injected so you can grade yourself later
 #   ./inject-faults.sh restore       put the six fabric switches back to the AVD intended
@@ -79,6 +79,9 @@ ticket_text() {
     8)  echo "T8  Compliance audit: leaf3 advertises EVPN type-1 and type-4 routes. POD_B is supposed to be MLAG-only. Remove the drift and explain the risk." ;;
     9)  echo "T9  Monitoring: leaf2 Port-Channel5 / Ethernet5 is err-disabled. host1 is running on one link." ;;
     10) echo "T10 NOC: spine1 and spine2 each lost one underlay BGP neighbor and one EVPN neighbor. Users report no impact yet." ;;
+    11) echo "T11 DB team: some DB flows from host1 (10.20.20.101) fail and others work. VLAN 10 is fine. The on-call engineer says show interfaces trunk on leaf1 lists VLAN 20 as allowed on Port-Channel5." ;;
+    12) echo "T12 App team: hosts on POD_B can reach other hosts in their own VLAN, but nothing routed, in any subnet. A change on leaf3 and leaf4 last night was about 'tidying up the routing config'." ;;
+    13) echo "T13 App team: about half of host2's off-subnet traffic in VLAN 10 fails. A colleague 'fixed the VRF' on leaf4 Vlan10 this morning; the running config still shows vrf TENANT-A on it." ;;
   esac
 }
 
@@ -117,7 +120,15 @@ inject() {
         cfg leaf2 "interface Port-Channel5" "spanning-tree bpduguard enable" ;;
     10) # Interfaces: leaf4 uplinks shut
         cfg leaf4 "interface Ethernet1" "shutdown" "interface Ethernet2" "shutdown" ;;
-    *)  echo "Unknown ticket: $t (use 1-10, all, random, list, restore)" >&2; exit 2 ;;
+    11) # Trunk group added to VLAN 20 on leaf1: pruned from every trunk without that group
+        cfg leaf1 "vlan 20" "trunk group DB-ONLY" ;;
+    12) # IP routing disabled in the tenant VRF on POD_B
+        for n in leaf3 leaf4; do
+          cfg "$n" "no ip routing vrf TENANT-A"
+        done ;;
+    13) # VRF removed and re-applied on leaf4 Vlan10: EOS drops the SVI address
+        cfg leaf4 "interface Vlan10" "no vrf" "vrf TENANT-A" ;;
+    *)  echo "Unknown ticket: $t (use 1-13, all, random, list, restore)" >&2; exit 2 ;;
   esac
 }
 
@@ -158,11 +169,11 @@ PY
 [[ $# -ge 1 ]] || { sed -n '2,24p' "$0"; exit 1; }
 
 case "$1" in
-  list)    for t in $(seq 1 10); do ticket_text "$t"; done ;;
+  list)    for t in $(seq 1 13); do ticket_text "$t"; done ;;
   restore) restore ;;
-  all)     for t in $(seq 1 10); do inject "$t"; done; seq 1 10 | tr '\n' ' ' > "$HERE/.injected" ;;
+  all)     for t in $(seq 1 13); do inject "$t"; done; seq 1 13 | tr '\n' ' ' > "$HERE/.injected" ;;
   random)  n="${2:-3}"
-           picks="$(seq 1 10 | shuf -n "$n" | sort -n | tr '\n' ' ')"
+           picks="$(seq 1 13 | shuf -n "$n" | sort -n | tr '\n' ' ')"
            for t in $picks; do inject "$t" >/dev/null; done
            echo "$picks" > "$HERE/.injected"
            echo "Injected $n random tickets. The complaints:"
