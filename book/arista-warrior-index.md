@@ -21,3 +21,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 32 | Upgrading EOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/32%5B%3Bvnd.vst.idref%3Dchapter-idm45591789973048%5D!/4/2/2%5Bupgrading_eos%5D) |
 | 34 | Link Layer Discovery Protocol | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/34%5B%3Bvnd.vst.idref%3Dchapter-idm45591789862360%5D!/4/2/2%5Blink_layer_discovery_protocol%5D) |
 | 36 | Bash | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/36%5B%3Bvnd.vst.idref%3Dchapter-idm45591789861832%5D!/4/2/2%5Bbash_idd0020%5D) |
+| 38 | Zero-Touch Provisioning | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/38%5B%3Bvnd.vst.idref%3Dchapter-idm45591789811160%5D!/4/2/2%5Bzero-touch_provisioning%5D) |
