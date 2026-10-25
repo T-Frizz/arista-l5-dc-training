@@ -200,7 +200,8 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
         <li><a href="#walk"><span class="dn">R1</span><span>EVPN packet walk</span><span></span></a></li>
         <li><a href="#tshoot"><span class="dn">R2</span><span>Troubleshooting ladder</span><span></span></a></li>
         <li><a href="#cheat"><span class="dn">R3</span><span>Show-command sheet</span><span></span></a></li>
-        <li><a href="#sources"><span class="dn">R4</span><span>Sources</span><span></span></a></li>
+        <li><a href="#containers"><span class="dn">R4</span><span>Containers (real world)</span><span></span></a></li>
+        <li><a href="#sources"><span class="dn">R5</span><span>Sources</span><span></span></a></li>
       </ol>
     </div>
   </nav>
@@ -1544,6 +1545,7 @@ EVPN Services
           <li>Nothing interactive: no <code>top</code>, no <code>watch</code>, no "are you sure?" prompts. Use <code>reload now</code>, not <code>reload</code>. <span class="pg">AW 30 p.172</span></li>
           <li><code>"format": "text"</code> returns the CLI text instead, still one dict per command, under <code>result[i]["output"]</code>. Handy for saving <code>show running-config</code> to a file. <span class="pg">AW 30 p.172</span></li>
           <li>The <code>/explorer</code> page on the switch builds and sends real requests (so config you send applies), shows the JSON, has a JavaScript script editor and the full command docs. Scripts post to <code>/command-api</code>. <span class="pg">AW 30 p.167–168</span></li>
+          <li>The lab topology for this guide is cEOS in containerlab, and a containerlab copy of production is the usual way to test AVD changes before they ship. See <a href="#containers">R4 Containers</a>. <span class="pg">AW 31</span></li>
           <li>Inventory groups map to roles: <code>FABRIC</code> &gt; <code>DC1</code> &gt; <code>DC1_SPINES</code>, <code>DC1_L3_LEAVES</code>, plus <code>NETWORK_SERVICES</code> and <code>CONNECTED_ENDPOINTS</code>.</li>
         </ul></div>
         <div class="part"><h4>AVD inputs (DC1.yml, trimmed)</h4>
@@ -1705,7 +1707,128 @@ print(node.enable("show version")[0]["result"]["version"])</pre></div>
   <p class="note">Add <code>| json</code> to almost any show command for structured output. Add <code>| section X</code> or <code>| include X</code> to filter config.</p>
 </section>
 
-<!-- ============ R4 SOURCES ============ -->
+<!-- ============ R4 CONTAINERS ============ -->
+<section class="block" id="containers">
+  <h2>Containers: cEOS and containers on EOS</h2>
+  <p class="note">Real-world depth, not an exam objective. The exam lab itself may run on cEOS, so knowing how it behaves still helps. Arista Warrior ch. 31 (pp.175–180) covers two directions: EOS running <em>inside</em> a container (cEOS), and containers running <em>on</em> an EOS switch.</p>
+
+  <div class="cols">
+    <div class="part"><h4>cEOS: EOS in a container</h4><ul>
+      <li>A container shares the host's kernel and packages one application with its dependencies, so it starts in seconds and uses far less memory than a VM (vEOS). <span class="pg">AW 31 p.175</span></li>
+      <li>Why Arista built it: to run EOS as the NOS on white-box switches with merchant silicon, managed by the same orchestrators the cloud titans use for their other containers. Labs are a side benefit. <span class="pg">AW 31 p.175</span></li>
+      <li>Get the cEOS-lab image from the Arista software downloads page (account needed) and <code>docker import</code> it with a tag. Run it with <code>docker create … /sbin/init</code>, attach networks, <code>docker start</code>. <span class="pg">AW 31 p.175–176</span></li>
+      <li>Get a CLI with <code>docker exec -it &lt;name&gt; Cli</code>. <code>docker attach</code> only shows the boot console. Interfaces come up as <code>Ethernet1…</code> with a software data plane. <span class="pg">AW 31 p.176–177</span></li>
+    </ul>
+<pre><span class="c"># what the book does by hand (4.21); containerlab does this for you</span>
+docker import cEOS-lab.tar.xz ceos:4.21.1F
+docker create --name ceos1 --privileged \
+  -e CEOS=1 -e EOS_PLATFORM=ceoslab -e container=docker \
+  -e ETBA=1 -e INTFTYPE=eth \
+  -e SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1 \
+  -it ceos:4.21.1F /sbin/init
+docker network create net-1
+docker network connect net-1 ceos1   <span class="c"># becomes Ethernet1</span>
+docker start ceos1
+docker exec -it ceos1 Cli</pre>
+    <div class="tbl"><table>
+      <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>CEOS=1</code></td><td>Tells EOS it is cEOS, not hardware EOS</td></tr>
+        <tr><td><code>ETBA=1</code></td><td>Software (not ASIC) data plane</td></tr>
+        <tr><td><code>INTFTYPE=eth</code></td><td>Linux interfaces named <code>eth</code>N map to EthernetN</td></tr>
+        <tr><td><code>container=docker</code></td><td>Which container runtime it's in</td></tr>
+        <tr><td><code>EOS_PLATFORM=ceoslab</code></td><td>Platform string; check your image's readme, it varies by release</td></tr>
+        <tr><td><code>SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1</code></td><td>Don't wait in ZTP at boot</td></tr>
+        <tr><td><code>--privileged</code>, <code>/sbin/init</code></td><td>Docker flags: privileged mode; start the init system</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">The flags come from the readme that ships with each cEOS release, and they change: newer images also use things like <code>MGMT_INTF=eth0</code> and <code>MAPETH0=1</code>. <span class="pg">AW 31 p.176</span></p>
+    </div>
+
+    <div class="part traps"><h4>cEOS gotchas and how containerlab fixes them</h4><ul>
+      <li><b>No LLDP across Docker networks.</b> Docker networks are Linux bridges, and bridges swallow link-local multicast like LLDP. Ping works; <code>show lldp neighbors</code> is empty. The fix is veth pairs (point-to-point links), which is what containerlab builds. <span class="pg">AW 31 p.177</span></li>
+      <li><b>Interface order isn't guaranteed past three networks.</b> Docker may attach net-4 before net-3, so Ethernet numbers don't match your diagram. containerlab names each link end <code>eth1</code>, <code>eth2</code> … explicitly, so <code>eth3</code> is always Ethernet3. <span class="pg">AW 31 p.177</span></li>
+      <li><b>Long <code>docker create</code> lines in scripts:</b> a space after a <code>\</code> breaks the continuation, and you get "-e: command not found". In vi, <code>:set list</code> shows trailing whitespace. <span class="pg">AW 31 p.176</span></li>
+      <li><b>Hostnames and config</b> are lost if you remove the container. containerlab saves startup configs per node (<code>containerlab save</code>) and can start nodes from your own config files.</li>
+      <li><b>Not everything is emulated:</b> no real ASIC means no hardware TCAM limits, no LANZ, no optics, and some features differ from hardware. Fine for control plane, config and automation testing; not for performance.</li>
+    </ul>
+<pre><span class="c"># containerlab: the same two-node lab, declared</span>
+name: two-ceos
+topology:
+  kinds:
+    ceos: { image: ceos:4.32.2F }
+  nodes:
+    ceos1: { kind: ceos }
+    ceos2: { kind: ceos }
+  links:
+    - endpoints: ["ceos1:eth1", "ceos2:eth1"]
+<span class="c"># containerlab deploy -t two-ceos.clab.yml</span>
+<span class="c"># ssh admin@clab-two-ceos-ceos1</span></pre></div>
+  </div>
+
+  <div class="cols">
+    <div class="part"><h4>Containers on an EOS switch</h4><ul>
+      <li>EOS includes Docker; in bash it needs <code>sudo</code>. But manage containers from the EOS CLI with <code>container-manager</code>, so they live in the running-config and CloudVision sees them. <span class="pg">AW 31 p.177–178</span></li>
+      <li><b>Image vs container:</b> an image is what you pull (like a disk image); a container is a running instance of it (like a VM). Each <code>bash docker run -it ubuntu</code> makes a new container with a random name. <span class="pg">AW 31 p.179</span></li>
+      <li><b>A container stops when its command ends.</b> The book's Ubuntu container shows "exited" because <code>/bin/bash</code> with no terminal returns at once. A real service runs a long-lived daemon. <span class="pg">AW 31 p.178–179</span></li>
+      <li><b>Reboots:</b> only <code>flash:</code> and <code>drive:</code> survive, so at boot <code>on-boot</code> containers pull their image again from the internet. <code>container-manager backup container X</code> saves it to <code>/mnt/flash/.containermgr/X.tar</code> so the switch uses that instead. The book's Ubuntu backup was about 90 MB: watch flash. <span class="pg">AW 31 p.179–180</span></li>
+    </ul></div>
+    <div class="part"><h4>Commands</h4>
+<pre>container-manager pull ubuntu          <span class="c">! exec mode</span>
+configure
+container-manager
+   container Ubuntu
+      image ubuntu
+      command /bin/sleep 300           <span class="c">! must stay running</span>
+      on-boot                          <span class="c">! start at boot</span>
+end
+container-manager start Ubuntu
+container-manager backup container Ubuntu
+container-manager backup remove Ubuntu
+
+show container-manager info            <span class="c">! counts, storage, CPUs, memory</span>
+show container-manager containers brief
+show container-manager backup
+bash sudo docker ps -a</pre>
+    <p class="note">Support for <code>container-manager</code> depends on platform and release; check the EOS manual for yours before you plan on it.</p></div>
+  </div>
+
+  <h3>Use cases worth knowing</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Use case</th><th>How it works</th><th>Why it matters</th><th>Watch out for</th></tr></thead>
+    <tbody>
+      <tr><td><b>Digital twin / pre-change testing</b></td><td>containerlab runs cEOS copies of the fabric, built from the same AVD inputs as production. CI deploys the change, then ANTA runs the same tests you run in production.</td><td>Catches config and design mistakes (missing VNI, wrong RT, bad route-map) before a change window. This is the most common real-world use of cEOS.</td><td>The software data plane doesn't model ASIC limits, buffers or optics; size the host for RAM (roughly 1–2 GB per node).</td></tr>
+      <tr><td><b>Training and exam prep</b></td><td>The lab guide's topology: 2 spines, 4 leaves, hosts, all cEOS in containerlab.</td><td>Build and break a full EVPN fabric on a laptop, in minutes, with no license or hardware.</td><td>Match your cEOS version to the one in the exam or production, since syntax drifts.</td></tr>
+      <tr><td><b>White-box NOS</b></td><td>EOS as a container on merchant-silicon hardware, managed by a container orchestrator. <span class="pg">AW 31 p.175</span></td><td>Same NOS and tooling on Arista and non-Arista boxes; hyperscale ops.</td><td>Mostly a hyperscaler pattern; support model and hardware qualification matter.</td></tr>
+      <tr><td><b>CI for automation code</b></td><td>Pipeline spins up a small cEOS lab, runs eAPI, pyeapi, Ansible or AVD against it, tears it down.</td><td>Tests scripts and templates against real EOS parsing, not mocks.</td><td>Image licensing for CI runners; keep the image in a private registry.</td></tr>
+      <tr><td><b>On-box monitoring and telemetry</b></td><td>A small collector or exporter in a container on the switch, reading eAPI over the Unix socket or localhost.</td><td>Works when the management network is down; local view of the box.</td><td>CPU and memory compete with EOS agents. Streaming telemetry to CloudVision or gNMI is usually the better answer.</td></tr>
+      <tr><td><b>Edge services at remote sites</b></td><td>DNS cache, DHCP relay helper, NTP, syslog or flow forwarder on a branch or edge switch.</td><td>Saves a small server at sites with only a switch.</td><td>The switch becomes a server you must patch; outages take down both roles.</td></tr>
+      <tr><td><b>On-box automation runner</b></td><td>A container with Python and your scripts, triggered by the scheduler or an event handler (3.1).</td><td>Self-healing actions and local checks without an external server.</td><td>Version control and secrets on the box; prefer eAPI over the Unix socket, not stored passwords.</td></tr>
+      <tr><td><b>Packet capture and analysis</b></td><td>tcpdump or tshark with a ring buffer to <code>drive:</code>, fed by a monitor session.</td><td>Capture at the point of the problem without a laptop on site.</td><td>Only control-plane and mirrored traffic reach the CPU; flash wears and fills.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="part traps"><h4>Risks of running containers on switches</h4><ul>
+    <li><b>Resources:</b> CPU and memory are shared with routing agents. A runaway container can starve BGP. Limit it with Docker options, and watch <code>show processes top once</code>.</li>
+    <li><b>Flash:</b> images and backups are tens to hundreds of MB, and flash is small. Keep an eye on it before upgrades, which need room for the new EOS image.</li>
+    <li><b>Support:</b> TAC supports EOS, not your container. Expect to reproduce problems without it.</li>
+    <li><b>Security:</b> a container is new code with network access on a core device. Use trusted images from a private registry, least privilege, and patch it like a server.</li>
+    <li><b>Lifecycle:</b> EOS upgrades can change Docker or container-manager behavior. Test the container on the new release in a lab first, which is a cEOS use case in itself.</li>
+  </ul></div>
+
+  <div class="book-notes">
+    <div class="part"><h4>Arista Warrior ch. 31, Containers: notes by page</h4><ul>
+      <li><b>p.175</b> Containers vs VMs (shared kernel, no simulated hardware, near-instant start), and why EOS in a container matters: white-box switching, with EOS as the NOS on merchant silicon. Installing Docker Desktop and the hello-world test.</li>
+      <li><b>p.176</b> Import the cEOS-lab image, create the container with the readme's flags, add two Docker networks, start it, and reach the CLI with <code>docker exec … Cli</code>.</li>
+      <li><b>p.177</b> Two containers with matching IPs on Ethernet1 can ping. No LLDP over Linux bridges (veth pairs fix it), and no fixed interface order past three networks. Then EOS's own Docker.</li>
+      <li><b>p.178</b> <code>sudo docker run hello-world</code> works on a switch. The proper way is through the CLI: <code>container-manager pull</code>, then <code>container</code>, <code>image</code>, <code>start</code>, and <code>show container-manager info</code> and <code>containers</code>. The container exits because its command finished.</li>
+      <li><b>p.179</b> Image vs container; restarting is instant because nothing boots. Change the command to something long-running, add <code>on-boot</code>; after a reload it comes back, but only because the switch pulled the image from the internet again. <code>backup container</code> fixes that.</li>
+      <li><b>p.180</b> Backups take flash space (90 MB for Ubuntu). <code>show container-manager backup</code> lists them and <code>backup remove</code> deletes them.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ R5 SOURCES ============ -->
 <section class="block" id="sources">
   <h2>Sources</h2>
   <div class="prose">
