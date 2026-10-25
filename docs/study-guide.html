@@ -588,7 +588,7 @@ Role:Leaf AND NOT device:leaf4</pre></div>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li><b>Scheduler</b> runs a CLI command on an interval and keeps rotating log files in flash. The built-in <code>tech-support</code> schedule runs hourly.</li>
-          <li><b>Event monitor</b> records MAC, ARP, route, LACP, MRoute and other table changes into a local SQLite database you can query later.</li>
+          <li><b>Event monitor</b> records MAC, ARP, route, LACP, IGMP snooping and MRoute table changes (added/removed rows with timestamps) into a local SQLite database you can query later. It is <b>off by default</b> since EOS 4.21. <span class="pg">AW 28 p.150</span></li>
           <li><b>Event manager</b> (<code>event-handler</code>, Arista's equivalent of Cisco EEM) runs a bash action on a trigger: <code>on-boot</code>, <code>on-intf</code>, <code>on-logging</code> (regex), <code>on-counters</code>, <code>on-maintenance</code>, <code>on-startup-config</code>, <code>vm-tracer</code>. <span class="pg">AW 27 p.143</span></li>
           <li>An <code>on-intf</code> action gets variables such as <code>$INTF</code>, <code>$OPERSTATE</code> and <code>$IP-PRIMARY</code>. For several CLI commands, put them in a script on flash and call it from the action. <span class="pg">AW 27 p.145</span></li>
           <li>Actions can call <code>FastCli</code>, send email (ch. 22), or write to flash.</li>
@@ -596,9 +596,13 @@ Role:Leaf AND NOT device:leaf4</pre></div>
         <div class="part"><h4>Configure</h4>
 <pre><span class="k">schedule</span> cfg-backup interval 60 max-log-files 24 command show running-config
 
-<span class="k">event-monitor</span>          <span class="c">! on by default; buffers MAC/ARP/route</span>
+<span class="k">event-monitor</span>                 <span class="c">! off by default since 4.21</span>
+event-monitor backup path em.log  <span class="c">! bare name = flash:em.log</span>
+event-monitor backup max-size 10  <span class="c">! rotated files, 1-200</span>
 show event-monitor mac match-mac 0050.5600.0001
+show event-monitor arp group-by ip
 show event-monitor route match-ip 10.10.10.0/24
+show event-monitor lacp verbose
 
 <span class="k">event-handler</span> UPLINK-DOWN
    trigger on-intf Ethernet1 operstatus
@@ -624,7 +628,7 @@ show event-monitor route match-ip 10.10.10.0/24
           <li><code>show schedule summary</code> · <code>dir flash:schedule/cfg-backup</code></li>
           <li><code>show event-handler</code> (trigger, action, last trigger time, counts; includes the built-in <code>DropCountersHandler</code>) <span class="pg">AW 27 p.147–148</span></li>
           <li><code>show event-handler trigger counters</code> (counters available to <code>on-counters</code>)</li>
-          <li><code>show event-monitor</code> sub-commands; <code>event-monitor interact</code> for SQL</li>
+          <li><code>show event-monitor</code> sub-commands with <code>match-interface</code>, <code>match-mac</code>, <code>match-ip</code> and <code>group-by</code>; raw SQL with <code>bash sqlite3 /var/log/eventMon.db</code> <span class="pg">AW 28 p.150–151</span></li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>Pick <code>delay</code> on purpose: a longer delay damps a flapping link, while <code>delay 0</code> is needed when triggers come in quick succession, or some are missed. <span class="pg">AW 27 p.147</span></li>
@@ -633,6 +637,8 @@ show event-monitor route match-ip 10.10.10.0/24
           <li><code>on-startup-config</code> fires on <code>write memory</code> or <code>copy running-config startup-config</code>, not when someone edits the file in bash. <span class="pg">AW 27 p.145</span></li>
           <li>Bash quoting inside <code>action bash</code>. Test the command in <code>bash</code> first.</li>
           <li>Scheduler interval is in minutes.</li>
+          <li>If event monitor is off, the show command suggests <code>event-monitor sync</code>; that does not turn it on. Configure <code>event-monitor</code>. <span class="pg">AW 28 p.150</span></li>
+          <li>The database lives in <code>/var/log</code> (RAM) and is lost on reboot unless a <code>backup path</code> is set. <span class="pg">AW 28 p.155</span></li>
         </ul></div>
       </div>
       <div class="book-notes">
@@ -643,6 +649,14 @@ show event-monitor route match-ip 10.10.10.0/24
           <li><b>p.146</b> An <code>on-counters</code> handler polls on an interval and compares a condition; <code>threshold</code> with a count requires several matches inside a window, so spiky values like CPU don't fire constantly. The condition can also be the output of a bash command. CloudVision is the better CPU monitor; this is the on-box fallback.</li>
           <li><b>p.147</b> The book's <code>on-startup-config</code> example copies startup-config to a timestamped file on every save, a cheap change history. Rapid saves were missed until <code>delay 0</code> was set. Watch flash space if you do this, or copy the files off-box; AAA command accounting is the more complete answer.</li>
           <li><b>p.147–148</b> <code>show event-handler</code> lists every handler with its trigger, action, polls, and when it last fired. EOS ships a built-in handler, <code>DropCountersHandler</code>, that polls drop counters and logs when they rise.</li>
+        </ul></div>
+        <div class="part"><h4>Arista Warrior ch. 28, Event Monitor: notes by page</h4><ul>
+          <li><b>p.150</b> Off by default since 4.21. The error you get when it is off points you at <code>event-monitor sync</code>, which is misleading: the fix is plain <code>event-monitor</code>. The old <code>show event-monitor sqlite</code> stopped working after 4.16; use <code>bash sqlite3 /var/log/eventMon.db</code> (for example <code>".schema arp"</code>) to see table layouts. ARP rows hold the VRF, IP, interface, MAC, change type and time.</li>
+          <li><b>p.151</b> Each row is an add or a remove, so you read a history, not a snapshot. <code>group-by</code> (interface, MAC or IP) summarizes it. <code>match-interface</code> takes abbreviations like <code>e1</code>, but raw SQL needs full names like <code>Ethernet1</code>. MAC rows show whether the entry was learned or static.</li>
+          <li><b>p.152</b> Forensics: a host that "moved" shows up with <code>match-mac</code> as learned on the uplink, then on a local port in an unused VLAN, which tells you someone repatched it. The route table logs adds and removes per prefix; filter with <code>match-ip</code>.</li>
+          <li><b>p.154</b> <code>show event-monitor lacp verbose</code> gives LACP state-machine changes for a post-mortem on a bundle that bounced. The IGMP snooping table tracks group joins and leaves per port.</li>
+          <li><b>p.155</b> Backup path: a bare file name lands in <code>flash:</code>; use a <code>file:</code> prefix for any other Unix path. Files rotate every 500 events (<code>.0</code>, <code>.1</code> …); <code>backup max-size</code> is 1–200, default 200. <code>event-monitor buffer max-size</code> sets the in-memory buffer (6–50). Tables can be turned on or off one by one (<code>event-monitor route</code>, <code>mac</code>, <code>arp</code> …), all at once with <code>event-monitor all</code>, or off with <code>no event-monitor all</code>.</li>
+          <li><b>p.155–156</b> The book's advice: leave it on. It is the first place to look after an outage. CloudVision keeps similar history centrally if you have it.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="24"></span><span data-ch="27"></span><span data-ch="28"></span><span data-ch="22"></span><a class="chip lab" data-lab="obj-3-1" href="#"><b>LAB</b>D3</a></div>
@@ -825,7 +839,7 @@ show ip route summary</pre></div>
 
   <div class="practice"><h3>Practice: D3</h3>
     <details class="q"><summary>Save the output of "show ip bgp summary" every 15 minutes, keeping one day of files.</summary><div class="a"><pre>schedule bgp-sum interval 15 max-log-files 96 command show ip bgp summary</pre></div></details>
-    <details class="q"><summary>A host says it moved last night. How do you prove when and where its MAC moved?</summary><div class="a"><p><code>show event-monitor mac match-mac &lt;mac&gt;</code> on the switch, or endpoint search in CloudVision, which keeps location history.</p></div></details>
+    <details class="q"><summary>A host says it moved last night. How do you prove when and where its MAC moved?</summary><div class="a"><p><code>show event-monitor mac match-mac &lt;mac&gt;</code> on the switch (only if event monitor was already enabled, since it is off by default), or endpoint search in CloudVision, which keeps location history.</p></div></details>
     <details class="q"><summary>Users report slow backups at 02:00, but the 5-minute SNMP graph for the storage uplink never passes 40%. How do you prove or rule out microbursts?</summary><div class="a"><p>Enable LANZ (<code>queue-monitor length</code>, ideally <code>notifying</code>), set thresholds on the uplink, and after the next backup check <code>show queue-monitor length &lt;intf&gt;</code> for S/U/E records, or dump <code>csv</code> to flash. Also check output discards on the interface. (AW ch.23 p.123–126)</p></div></details>
     <details class="q"><summary>You run tcpdump on Ethernet5 and see none of the host's traffic to another host. Why?</summary><div class="a"><p>EOS tcpdump on an interface only shows CPU-bound frames. Transit traffic is switched in hardware. Mirror the port to <code>Cpu</code> and capture on <code>mirror0</code>.</p></div></details>
   </div>
