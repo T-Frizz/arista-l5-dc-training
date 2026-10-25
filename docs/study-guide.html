@@ -433,7 +433,7 @@ show interfaces counters rates  ! uplink balance</pre></div>
   <article class="obj" id="obj-1-1" data-dom="1">
     <header><span class="oid">1.1</span><h3>EOS foundations: SysDB, the CLI, and safe config change</h3><label class="conf"><input type="checkbox" id="c-1-1"> I can do this</label></header>
     <div class="body">
-      <p class="note">One unit covering Arista Warrior ch. 7 (SysDB), ch. 8 (Introduction to EOS) ch. 9 (Configuration Management) and ch. 12 (Bash). Read it in that order: how EOS keeps state, how you drive it from the CLI, how you change it safely, and the Linux underneath. Book pages are cited; extra detail comes from current EOS docs.</p>
+      <p class="note">One unit covering Arista Warrior ch. 7 (SysDB), ch. 8 (Introduction to EOS) ch. 9 (Configuration Management) and ch. 12 (Bash). Read it in that order: how EOS keeps state, how you drive it from the CLI, how you change it safely, and the Linux underneath. Book pages are cited; extra detail comes from current EOS docs. Extending EOS (ch. 16) and the bootloader (ch. 14) continue the unit in <a href="#obj-1-3">1.3</a>.</p>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li><b>SysDB</b> is the in-memory database at the center of EOS. Every feature runs as its own Linux process (an <b>agent</b>: Stp, Bgp, Lldp, ConfigAgent…) in protected memory, and agents never talk to each other directly: they publish state to SysDB and subscribe to what they need. <span class="pg">AW 7 p.35</span></li>
@@ -727,11 +727,11 @@ show spanning-tree bridge detail | include agent
   </article>
 
   <article class="obj" id="obj-1-3" data-dom="1">
-    <header><span class="oid">1.3</span><h3>Extensions, Aboot and recovery</h3><label class="conf"><input type="checkbox" id="c-1-3"> I can do this</label></header>
+    <header><span class="oid">1.3</span><h3>Extensions, Aboot and recovery (EOS foundations, part 2)</h3><label class="conf"><input type="checkbox" id="c-1-3"> I can do this</label></header>
     <div class="body">
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
-          <li>Extensions (.swix/.rpm) add features or hotfixes. Install, then copy to boot-extensions so they survive a reload. TerminAttr is an extension.</li>
+          <li>Extensions add features or hotfixes. A <code>.swix</code> is one or more RPMs zipped with a manifest, so dependencies install together. Install, then copy to boot-extensions so they survive a reload. TerminAttr is an extension. <span class="pg">AW 16 p.76</span></li>
           <li>Aboot is the bootloader. It reads <code>flash:boot-config</code> and boots the SWI it names. It stops at an <code>Aboot#</code> shell if boot-config or the image is missing or corrupt, or if you press Ctrl-C at the prompt. <span class="pg">AW 14 p.63</span></li>
           <li>Lost password: from Aboot, edit <code>/mnt/flash/startup-config</code> and comment out the <code>username</code> lines, or rename the file (the switch then boots with no config and may go into ZTP). <span class="pg">AW 14 p.67</span></li>
           <li><code>fullrecover</code> in Aboot wipes all of flash back to factory. Last resort. <span class="pg">AW 14 p.65</span></li>
@@ -742,6 +742,9 @@ show spanning-tree bridge detail | include agent
 <span class="k">extension</span> TerminAttr-1.30.swix
 <span class="k">copy installed-extensions boot-extensions</span>
 show extensions
+show boot-extensions
+no extension TerminAttr-1.30.swix          <span class="c">! deactivate only</span>
+delete extension:TerminAttr-1.30.swix      <span class="c">! remove the file</span>
 
 <span class="c">! Aboot shell (Ctrl-C during boot)</span>
 Aboot# cd /mnt/flash
@@ -759,7 +762,10 @@ boot console speed 9600</pre></div>
           <li><code>show boot-extensions</code></li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
-          <li>Installing an extension but not adding it to boot-extensions.</li>
+          <li>Installing an extension but not adding it to boot-extensions: it's gone after the next reload. <span class="pg">AW 16 p.77</span></li>
+          <li><code>no extension</code> doesn't delete anything; the file stays on <code>extension:</code> and in boot-extensions until you remove it (re-run <code>copy installed-extensions boot-extensions</code> after uninstalling). <span class="pg">AW 16 p.77</span></li>
+          <li>An extension that changes the CLI needs you to log out and back in before its commands appear. <span class="pg">AW 16 p.76</span></li>
+          <li>Chassis with two supervisors: the extension must be on both, or a switchover comes up without it. <span class="pg">AW 16 p.76</span></li>
           <li>Extension built for a different EOS architecture (32/64-bit) shows as not installable.</li>
           <li>Setting <code>boot secret</code> and losing it: three wrong Aboot passwords only offer <code>fullrecover</code>. <span class="pg">AW 14 p.65</span></li>
           <li>Not enough flash for a new image: <code>dir flash:</code> and delete old <code>.swi</code> files first (keep the running one and one known-good).</li>
@@ -812,7 +818,50 @@ Aboot# reboot              <span class="c"># log in as admin, no password</span>
 <span class="c"># 4. lost Aboot password too</span>
 <span class="c">#   3 wrong tries -> "fullrecover" (erases all flash)</span></pre></div>
       </div>
+      <div class="cols">
+        <div class="part"><h4>The extension system in depth (AW ch. 16)</h4><ul>
+          <li><b>Why:</b> EOS is Linux, but direct package installs could break it, so Arista blocks the repos and gives you extensions instead: an RPM bundle with its dependencies, installed and tracked by EOS. Security-advisory patches ship this way. <span class="pg">AW 16 p.76–77</span></li>
+          <li><b>Getting them on:</b> <code>copy</code> from http, https, scp, sftp, ftp, tftp, flash, usb… straight to <code>extension:</code>, a hidden directory, <code>/mnt/flash/.extensions</code>. <span class="pg">AW 16 p.76–77</span></li>
+          <li><b>Status in <code>show extensions</code>:</b> <code>A</code> available, <code>NA</code> not available (wrong EOS version or architecture, missing dependency), <code>I</code> installed, <code>NI</code> not installed, <code>F</code> forced. The RPMs column counts the packages inside. <span class="pg">AW 16 p.76</span></li>
+          <li><b>Lifecycle:</b> copy → <code>extension NAME</code> (install) → <code>copy installed-extensions boot-extensions</code> (persist) → <code>no extension NAME</code> (deactivate) → <code>delete extension:NAME</code> (remove). <code>flash:boot-extensions</code> is a plain list of names; old releases had no CLI to clear an entry, so you edited it in bash. <span class="pg">AW 16 p.77</span></li>
+          <li><b>Boot order:</b> extensions load early in boot, before startup-config, so the config can use commands the extension adds. <span class="pg">AW 16 p.78</span></li>
+          <li><b>Hotfix workflow (security advisory):</b> read the advisory to confirm your release is affected and which hotfix matches it; download the <code>.swix</code> and its checksum from arista.com; <code>verify /sha512</code>; copy to <code>extension:</code>; install; check <code>show extensions</code> shows <code>A, I</code>; add to boot-extensions; and save. Many hotfixes take effect without a reload; the advisory says if an agent restart or reload is needed.</li>
+          <li><b>Hotfixes and upgrades:</b> a hotfix is built for specific EOS versions. After upgrading to a release that includes the fix, it shows <code>NA</code> and should be removed from boot-extensions; if the new release doesn't include it, you need the matching hotfix build. Check <code>show extensions</code> after every upgrade.</li>
+          <li><b>Signatures:</b> newer EOS can check that extensions are Arista-signed before installing (signature verification under <code>management security</code>). Unsigned ones like the book's CPU-Hist then need verification relaxed or <code>force</code>. Check the exact command for your release.</li>
+          <li><b>CloudVision:</b> TerminAttr is an extension; CloudVision upgrades it by putting the new <code>.swix</code> in the image bundle with the EOS image (2.2). On current EOS a TerminAttr version is also bundled in the image.</li>
+          <li><b>EOS SDK:</b> large customers write their own agents in C++ or Python with the EOS SDK. They run like Arista's agents, react to SysDB state (1.1), and are packaged as extensions. Smaller jobs fit eAPI scripts or event handlers better. <span class="pg">AW 16 p.78</span></li>
+        </ul></div>
+        <div class="part"><h4>Hotfix commands</h4>
+<pre>copy https://srv/SA0099-hotfix.swix extension:
+verify /sha512 extension:SA0099-hotfix.swix
+extension SA0099-hotfix.swix
+show extensions                 <span class="c">! A, I</span>
+show extensions detail
+copy installed-extensions boot-extensions
+show boot-extensions
+write memory
+
+<span class="c">! after an upgrade that includes the fix</span>
+no extension SA0099-hotfix.swix
+copy installed-extensions boot-extensions
+delete extension:SA0099-hotfix.swix
+
+<span class="c">! book example (4.21): two extensions</span>
+copy http://10.0.0.100/RPM/GnuPlot-EOS-4-15-2.swix extension:
+copy http://10.0.0.100/RPM/CPU-Hist-1-4.swix extension:
+extension GnuPlot-EOS-4-15-2.swix
+extension CPU-Hist-1-4.swix
+cpuhist sec                     <span class="c">! alias the RPM adds</span>
+
+<span class="c">! old EOS: clear boot-extensions from bash</span>
+bash cd /mnt/flash; vi boot-extensions</pre></div>
+      </div>
       <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 16, The EOS Extension System: notes by page</h4><ul>
+          <li><b>p.76</b> A <code>.swix</code> (SoftWare Image eXtension) is one or more RPMs zipped with a manifest. Arista blocks the Linux repos because installing arbitrary packages could break EOS; extensions give you packages with dependencies, and are how security patches ship. Sources: EOS Central, GitHub, the software downloads page. Example: the author's CPU-Hist extension (like Cisco's <code>show proc cpu hist</code>), which needs a GnuPlot extension. <code>copy ?</code> lists sources; <code>copy http://… extension:</code>. <code>dir extension:</code>, then <code>show extensions</code> with A/NA/I/NI/F. Chassis: copy to all supervisors. Install with <code>extension NAME</code>; log out and in for CLI changes.</li>
+          <li><b>p.77</b> CPU-Hist graphs CPU use (<code>cpuhist sec</code>, <code>cpuhist min</code>). <code>no extension</code> only makes it inactive; <code>del extension:…</code> removes it; <code>extension:</code> is <code>/mnt/flash/.extensions</code>. Installed status doesn't survive a reboot without <code>copy installed-extensions boot-extensions</code>; <code>flash:boot-extensions</code> is just a list of names. There was no CLI way to remove an entry (4.21.1F), so edit or move the file in bash. An older switch shows a web server and a security-advisory patch as extensions.</li>
+          <li><b>p.78</b> Extensions load very early in boot, so startup-config can use their commands. Most real use is security and bug patches; big customers write custom agents with the EOS SDK.</li>
+        </ul></div>
         <div class="part"><h4>Arista Warrior ch. 14, Aboot: notes by page</h4><ul>
           <li><b>p.63</b> Aboot is EOS's second-stage bootloader (like GRUB). It reads <code>boot-config</code> on flash, and halts at an <code>Aboot#</code> prompt if boot-config is bad or missing, the image is bad or missing, or you press Ctrl-C. Normal boot output, then Ctrl-C into the shell. Fans run loud in Aboot. <code>help</code> lists the BusyBox commands. <code>ls</code> at <code>/</code> shows a normal Linux tree.</li>
           <li><b>p.64</b> <code>flash:</code> is an EOS name; in Aboot it's <code>/mnt/flash</code> (alongside drive and conf files under <code>/mnt</code>). Runtime files aren't there. boot-config uses EOS-style names (<code>SWI=flash:EOS-4.20.1F.swi</code>). The four kinds of entry: SWI, CONSOLESPEED, PASSWORD, NET. Valid SWI locations: flash, usb1, /mnt/flash, HTTP, FTP (with or without credentials), TFTP, NFS. Network sources need NET settings because only <code>ma1</code> works in Aboot. CONSOLESPEED from 1200 to 38400, default 9600.</li>
