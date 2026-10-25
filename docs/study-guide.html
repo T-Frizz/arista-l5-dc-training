@@ -200,7 +200,7 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
         <li><a href="#walk"><span class="dn">R1</span><span>EVPN packet walk</span><span></span></a></li>
         <li><a href="#tshoot"><span class="dn">R2</span><span>Troubleshooting ladder</span><span></span></a></li>
         <li><a href="#cheat"><span class="dn">R3</span><span>Show-command sheet</span><span></span></a></li>
-        <li><a href="#containers"><span class="dn">R4</span><span>Containers (real world)</span><span></span></a></li>
+        <li><a href="#containers"><span class="dn">R4</span><span>cEOS, vEOS and VMs (real world)</span><span></span></a></li>
         <li><a href="#sources"><span class="dn">R5</span><span>Sources</span><span></span></a></li>
       </ol>
     </div>
@@ -1709,8 +1709,8 @@ print(node.enable("show version")[0]["result"]["version"])</pre></div>
 
 <!-- ============ R4 CONTAINERS ============ -->
 <section class="block" id="containers">
-  <h2>Containers: cEOS and containers on EOS</h2>
-  <p class="note">Real-world depth, not an exam objective. The exam lab itself may run on cEOS, so knowing how it behaves still helps. Arista Warrior ch. 31 (pp.175–180) covers two directions: EOS running <em>inside</em> a container (cEOS), and containers running <em>on</em> an EOS switch.</p>
+  <h2>cEOS, vEOS, and workloads on EOS</h2>
+  <p class="note">Real-world depth, not an exam objective. The exam lab itself may run on cEOS, so knowing how it behaves still helps. Arista Warrior ch. 31 (pp.175–180) and ch. 32 (pp.181, 184–187) cover both directions: EOS running <em>inside</em> a container or VM (cEOS, vEOS), and containers or VMs running <em>on</em> an EOS switch.</p>
 
   <div class="cols">
     <div class="part"><h4>cEOS: EOS in a container</h4><ul>
@@ -1793,17 +1793,71 @@ bash sudo docker ps -a</pre>
     <p class="note">Support for <code>container-manager</code> depends on platform and release; check the EOS manual for yours before you plan on it.</p></div>
   </div>
 
+  <h3>vEOS: EOS as a virtual machine</h3>
+  <div class="cols">
+    <div class="part"><h4>Know</h4><ul>
+      <li>vEOS is the same EOS code compiled for a VM, not a separate product. What it can't do is anything that needs an ASIC: TapAgg, LANZ, FlexRoute, Direct Flow, hardware TCAM limits. Software features all work: LLDP, MLAG, ZTP, STP, routing, bash, Python, eAPI, event manager, scheduler, event monitor. That makes it a control-plane and interoperability test tool. <span class="pg">AW 32 p.181, 187</span></li>
+      <li><b>vEOS-lab</b>: free with an arista.com login, for labs. <b>vEOS-router</b> (now usually called CloudEOS): for AWS, Azure and GCP, licensed, with a faster forwarding path and IPsec VPN. <span class="pg">AW 32 p.181</span></li>
+      <li>Newer releases ship Aboot and vEOS as one combined image, which makes building VMs simpler. <span class="pg">AW 32 p.181</span></li>
+      <li>vEOS vs cEOS for labs: vEOS boots slower and needs more RAM per node (about 2 GB), but behaves more like a real switch (its own kernel, Aboot, Management1). cEOS is lighter and starts in seconds. Both are fine for this exam's topics.</li>
+    </ul></div>
+    <div class="part"><h4>vEOS in EVE-NG (your setup)</h4><ul>
+      <li>The book builds its lab in VirtualBox (pp.182–183, skipped here). In EVE-NG, vEOS-lab is a QEMU node: convert the <code>.vmdk</code> to <code>qcow2</code>, put it in a <code>veos-&lt;version&gt;</code> folder under the EVE-NG QEMU images directory, and fix permissions. Check EVE-NG's own vEOS how-to for the exact folder and file name for your EVE-NG version.</li>
+      <li>Give each node 2 GB RAM or more. Put Management1 on an EVE-NG cloud/bridge network that your Ubuntu automation server can reach, so Ansible and AVD can talk eAPI to every node.</li>
+      <li>EVE-NG links are point-to-point, so LLDP works between nodes, unlike plain Docker bridges.</li>
+    </ul>
+<pre>qemu-img convert -O qcow2 vEOS-lab-4.32.2F.vmdk virtioa.qcow2
+<span class="c"># then the folder name, image name and permissions per EVE-NG docs</span></pre></div>
+  </div>
+
+  <div class="cols">
+    <div class="part"><h4>VMs running on an EOS switch</h4><ul>
+      <li>EOS can host VMs with <code>virtual-machine</code>. You can; that doesn't mean you should. A VM eats RAM, and running out of memory is one of the worst things that can happen to a switch. <span class="pg">AW 32 p.184</span></li>
+      <li>Default memory is a tiny 128 MB; the maximum on 4.21 was 2047 MB (not 2048). Many switches only have 4 GB in total. <span class="pg">AW 32 p.184</span></li>
+      <li>NICs bind to Management1 or to VLAN SVIs. The SVI must exist (it needn't have an IP), or the line is ignored with "Device Vlan101 does not exist". EOS assigns the MACs. <span class="pg">AW 32 p.184</span></li>
+      <li>Each VM needs its own copy of the disk image; two VMs on one <code>.vmdk</code> will fight. Copies are about 700 MB each on flash. <span class="pg">AW 32 p.184–185, 187</span></li>
+      <li>Inside a vEOS guest, data ports didn't pass traffic until the IP was also put on the matching <code>vmnicet</code> bridge interface in bash. The book's workaround from Arista developers; treat it as a 4.21-era quirk. <span class="pg">AW 32 p.185</span></li>
+      <li>A guest can reach other hosts on the network and other guests, but not the host switch's own IPs. The VLAN in the guest is local and untagged, so its number needn't match the host's. You can't nest a VM inside a vEOS guest. <span class="pg">AW 32 p.185–186</span></li>
+    </ul></div>
+    <div class="part"><h4>Commands</h4>
+<pre>interface Vlan101                     <span class="c">! SVI must exist first</span>
+virtual-machine LAB-1
+   disk-image flash:vEOS-1.vmdk       <span class="c">! one copy per VM</span>
+   memory-size 2047                   <span class="c">! MB; default 128</span>
+   virtual-nic 1 Management1
+   virtual-nic 2 Vlan101
+   enable                             <span class="c">! boots the VM</span>
+
+show virtual-machine                  <span class="c">! enabled / running</span>
+show virtual-machine detail           <span class="c">! disk, RAM, NIC MACs</span>
+virtual-machine LAB-1 console         <span class="c">! Ctrl-C leaves the console</span>
+show running-config section virtual
+
+virtual-machine LAB-1
+   no enable                          <span class="c">! stop it; still uses flash</span>
+<span class="c">! guest bash, book's workaround:</span>
+<span class="c">! sudo ifconfig vmnicet1 30.0.0.21/24</span></pre></div>
+  </div>
+  <div class="part traps"><h4>VM-on-switch traps</h4><ul>
+    <li>Ctrl-C in the VM console exits the console, not just config mode. Use Ctrl-Z or <code>end</code> inside the guest. <span class="pg">AW 32 p.185</span></li>
+    <li>A VM left <code>enable</code>d and saved starts again on every reload and takes its RAM back. Disable it when done; the disk image still sits on flash. <span class="pg">AW 32 p.186</span></li>
+    <li>Two 2 GB VMs used 4 GB, the whole RAM of many switches. Never do this on a production box during the day. If you must, use a switch with lots of RAM and an SSD (<code>drive:</code>) for the images, not flash. <span class="pg">AW 32 p.185, 187</span></li>
+    <li>Guests come up slowly and may sit in ZTP: run <code>zerotouch disable</code> inside the guest. <span class="pg">AW 32 p.184</span></li>
+  </ul></div>
+
   <h3>Use cases worth knowing</h3>
   <div class="tbl"><table>
     <thead><tr><th>Use case</th><th>How it works</th><th>Why it matters</th><th>Watch out for</th></tr></thead>
     <tbody>
       <tr><td><b>Digital twin / pre-change testing</b></td><td>containerlab runs cEOS copies of the fabric, built from the same AVD inputs as production. CI deploys the change, then ANTA runs the same tests you run in production.</td><td>Catches config and design mistakes (missing VNI, wrong RT, bad route-map) before a change window. This is the most common real-world use of cEOS.</td><td>The software data plane doesn't model ASIC limits, buffers or optics; size the host for RAM (roughly 1–2 GB per node).</td></tr>
-      <tr><td><b>Training and exam prep</b></td><td>The lab guide's topology: 2 spines, 4 leaves, hosts, all cEOS in containerlab.</td><td>Build and break a full EVPN fabric on a laptop, in minutes, with no license or hardware.</td><td>Match your cEOS version to the one in the exam or production, since syntax drifts.</td></tr>
+      <tr><td><b>Training and exam prep</b></td><td>The lab guide's topology: 2 spines, 4 leaves, hosts, in cEOS with containerlab or vEOS-lab in EVE-NG, driven by Ansible/AVD from an automation server.</td><td>Build and break a full EVPN fabric on a laptop, in minutes, with no license or hardware.</td><td>Match your cEOS version to the one in the exam or production, since syntax drifts.</td></tr>
       <tr><td><b>White-box NOS</b></td><td>EOS as a container on merchant-silicon hardware, managed by a container orchestrator. <span class="pg">AW 31 p.175</span></td><td>Same NOS and tooling on Arista and non-Arista boxes; hyperscale ops.</td><td>Mostly a hyperscaler pattern; support model and hardware qualification matter.</td></tr>
       <tr><td><b>CI for automation code</b></td><td>Pipeline spins up a small cEOS lab, runs eAPI, pyeapi, Ansible or AVD against it, tears it down.</td><td>Tests scripts and templates against real EOS parsing, not mocks.</td><td>Image licensing for CI runners; keep the image in a private registry.</td></tr>
       <tr><td><b>On-box monitoring and telemetry</b></td><td>A small collector or exporter in a container on the switch, reading eAPI over the Unix socket or localhost.</td><td>Works when the management network is down; local view of the box.</td><td>CPU and memory compete with EOS agents. Streaming telemetry to CloudVision or gNMI is usually the better answer.</td></tr>
       <tr><td><b>Edge services at remote sites</b></td><td>DNS cache, DHCP relay helper, NTP, syslog or flow forwarder on a branch or edge switch.</td><td>Saves a small server at sites with only a switch.</td><td>The switch becomes a server you must patch; outages take down both roles.</td></tr>
       <tr><td><b>On-box automation runner</b></td><td>A container with Python and your scripts, triggered by the scheduler or an event handler (3.1).</td><td>Self-healing actions and local checks without an external server.</td><td>Version control and secrets on the box; prefer eAPI over the Unix socket, not stored passwords.</td></tr>
+      <tr><td><b>eAPI and script testing</b></td><td>One vEOS or cEOS node reachable over IP from your automation server. <span class="pg">AW 32 p.187</span></td><td>Test eAPI scripts and playbooks with no risk to real switches. The book author's favorite use.</td><td>Output and keys can differ slightly from hardware platforms; confirm on a real box before production.</td></tr>
+      <tr><td><b>VM on a switch</b></td><td><code>virtual-machine</code> on a high-RAM switch. <span class="pg">AW 32 p.184</span></td><td>A small service or test node where there's no server. Rarely the right choice.</td><td>RAM, flash, auto-start on reload, support. Containers or a real server are usually better.</td></tr>
       <tr><td><b>Packet capture and analysis</b></td><td>tcpdump or tshark with a ring buffer to <code>drive:</code>, fed by a monitor session.</td><td>Capture at the point of the problem without a laptop on site.</td><td>Only control-plane and mirrored traffic reach the CPU; flash wears and fills.</td></tr>
     </tbody>
   </table></div>
@@ -1824,6 +1878,13 @@ bash sudo docker ps -a</pre>
       <li><b>p.178</b> <code>sudo docker run hello-world</code> works on a switch. The proper way is through the CLI: <code>container-manager pull</code>, then <code>container</code>, <code>image</code>, <code>start</code>, and <code>show container-manager info</code> and <code>containers</code>. The container exits because its command finished.</li>
       <li><b>p.179</b> Image vs container; restarting is instant because nothing boots. Change the command to something long-running, add <code>on-boot</code>; after a reload it comes back, but only because the switch pulled the image from the internet again. <code>backup container</code> fixes that.</li>
       <li><b>p.180</b> Backups take flash space (90 MB for Ubuntu). <code>show container-manager backup</code> lists them and <code>backup remove</code> deletes them.</li>
+    </ul></div>
+    <div class="part"><h4>Arista Warrior ch. 32, vEOS: notes by page (VirtualBox pages skipped)</h4><ul>
+      <li><b>p.181</b> vEOS is EOS packaged as a VM, the same code; features tied to an ASIC (TapAgg, Direct Flow on a 7150) don't work, the software ones do. vEOS-lab vs vEOS-router. Aboot and vEOS now come as one image. The book's four-node VirtualBox lab follows.</li>
+      <li><b>p.184</b> VMs on a 32 GB 7280R: <code>virtual-machine</code>, <code>disk-image</code>, <code>memory-size 2047</code>, a NIC on Management1, NICs on VLAN SVIs (which must exist), <code>enable</code>, <code>show virtual-machine</code>, the console, and a hostname and management IP in the guest.</li>
+      <li><b>p.185</b> Data ports in the guest only worked after the IP also went on the <code>vmnicet</code> interface in bash. The guest can't ping its host switch but can reach others. The VM config shows host-assigned MACs that match <code>vmnicet</code>, not <code>et</code>. A second VM needs its own disk copy; two VMs used 4 GB. Ctrl-C leaves the console.</li>
+      <li><b>p.186</b> The two guests reach each other, other hosts, but not the host switch. The VLAN is local to each guest. No VMs inside a guest. <code>show virtual-machine detail</code>, then <code>no enable</code> to stop them. Enabled VMs restart at reload.</li>
+      <li><b>p.187</b> The two disk images use about 1.4 GB of flash; use an SSD if you ever do this for real. What vEOS is good for: MLAG, routing, ZTP and eAPI testing; anything except ASIC features like TapAgg, LANZ and FlexRoute.</li>
     </ul></div>
   </div>
 </section>
