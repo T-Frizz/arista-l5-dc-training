@@ -833,7 +833,7 @@ management api http-commands
           <li><b>Snapshots</b> capture show-command output before and after a change. <b>Rollback</b> returns a device (or the whole network) to an earlier config and image.</li>
           <li><b>Configlet builders</b> are Python with a form that generate per-device configlets (hostname, IPs) from inputs.</li>
           <li><b>Image bundles</b> hold an EOS image plus extensions and are assigned like configlets.</li>
-          <li><b>ZTP</b>: a factory-default switch gets DHCP with a bootfile URL pointing to CVP, registers, and lands in the Undefined container. <b>ZTR</b> (replacement) gives a new switch the config of the one it replaces.</li>
+          <li><b>ZTP</b>: a factory-default switch gets DHCP with a bootfile URL pointing to CVP, registers, and lands in the Undefined container. <b>ZTR</b> (replacement) gives a new switch the config of the one it replaces. Details below. <span class="pg">AW 13 p.61</span></li>
         </ul></div>
         <div class="part"><h4>Workflow</h4>
 <pre><span class="c"># Classic provisioning, in order</span>
@@ -863,6 +863,79 @@ option bootfile-name
           <li>Creating tasks but never executing the change control.</li>
           <li>Two configlets that set the same line with different values; the last one in order wins.</li>
           <li>Moving a device to a new container drops the old container's configlets.</li>
+        </ul></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>ZTP in depth (AW ch. 13)</h4><ul>
+          <li><b>Trigger:</b> a fixed switch boots into ZTP when startup-config is missing or zero bytes. It sets every Ethernet and Management port to <code>no switchport</code> and sends DHCP out of each connected one, retrying forever. <span class="pg">AW 13 p.58</span></li>
+          <li><b>While ZTP runs, config you type is thrown away</b> when it retries, and current EOS refuses <code>write memory</code> ("Cannot copy to startup-config when ZeroTouch is enabled"). Read the login banner. <span class="pg">AW 13 p.58</span></li>
+          <li><b><code>zerotouch cancel</code></b> reloads at once, no prompt, and skips ZTP for one boot only (it writes a disable-once flag to boot-config). Erase startup-config later and ZTP is back. <span class="pg">AW 13 p.59</span></li>
+          <li><b><code>zerotouch disable</code></b> also reloads without asking and turns ZTP off for good by writing <code>DISABLE=True</code> to <code>flash:zerotouch-config</code>. <code>zerotouch enable</code> is refused interactively; to turn it back on, delete <code>flash:zerotouch-config</code> (and startup-config) and reload. <span class="pg">AW 13 p.59</span></li>
+          <li><b>Needs:</b> a DHCP server, a file server (HTTP, often the same box), and a connected port. The DHCP reply's <b>bootfile-name</b> (option 67) is the URL to fetch. <span class="pg">AW 13 p.58, 60</span></li>
+          <li><b>Config or script?</b> If line one of the downloaded file is a shebang (<code>#!/usr/bin/Cli</code>, <code>#!/usr/bin/env python3</code>, <code>#!/bin/bash</code>), it's run as a script; otherwise it's applied as startup-config. Then the switch reloads. <span class="pg">AW 13 p.60</span></li>
+          <li>A script can copy the startup-config and the right EOS image, then set <code>boot system</code>. No <code>write memory</code> is needed because the file was copied straight to startup-config. <code>zerotouch script-exec-timeout</code> limits how long a script may run. <span class="pg">AW 13 p.59–60</span></li>
+          <li><b>At scale:</b> CloudVision has a ZTP server built in (point DHCP at it); <code>ztpserver</code> (open source, EOS+ / arista-eosplus on GitHub) maps switches to configs by serial, MAC or LLDP neighbor; some sites auto-archive every config so a replacement switch rebuilds itself from the last copy. <span class="pg">AW 13 p.61</span></li>
+        </ul></div>
+        <div class="part"><h4>DHCP and scripts</h4>
+<pre><span class="c"># ISC dhcpd (the book's lab)</span>
+subnet 10.0.0.0 netmask 255.255.255.0 {
+  range 10.0.0.30 10.0.0.50;
+  option routers 10.0.0.1;
+  option domain-name-servers 10.0.0.100;
+  option bootfile-name "http://10.0.0.100/ztp/ZTP-Script";
+}
+<span class="c"># one switch, by MAC</span>
+host leaf1 { hardware ethernet 00:1c:73:aa:bb:01;
+  fixed-address 10.0.0.31;
+  option bootfile-name "http://10.0.0.100/ztp/leaf1"; }
+
+<span class="c"># ZTP-Script (runs because of the shebang)</span>
+#!/usr/bin/Cli -p2
+enable
+copy http://10.0.0.100/cfg/leaf1.cfg flash:startup-config
+copy http://10.0.0.100/img/EOS-4.32.2F.swi flash:
+config
+boot system flash:EOS-4.32.2F.swi
+
+<span class="c">! on the switch</span>
+show zerotouch
+show logging | include ZTP
+zerotouch cancel        <span class="c">! one boot, reloads now</span>
+zerotouch disable       <span class="c">! permanent, reloads now</span>
+delete flash:zerotouch-config   <span class="c">! re-enable</span></pre>
+<pre><span class="c"># healthy ZTP log, in order</span>
+ZTP-5-INIT          no startup-config, starting
+ZTP-5-DHCP_QUERY    sending DHCP on [Et10, Et11…]
+ZTP-6-CONFIG_DOWNLOAD           fetching bootfile
+ZTP-6-CONFIG_DOWNLOAD_SUCCESS
+ZTP-6-EXEC_SCRIPT / EXEC_SCRIPT_SUCCESS
+ZTP-6-RELOAD        rebooting with new config</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>ZTP with CloudVision, in practice</h4><ul>
+          <li><b>On-prem CVP:</b> DHCP bootfile = <code>http://&lt;cvp&gt;/ztp/bootstrap</code>. The bootstrap script installs and starts TerminAttr pointed at CVP, the device registers, and it appears in Inventory (Undefined container, or ready to provision in Studios). You then assign configlets or Studio inputs and an image, and the change control pushes the full config (built with <code>rollback clean-config</code> sessions, AW 9 p.49).</li>
+          <li><b>CVaaS:</b> download the bootstrap script from the CVaaS onboarding page; it carries an onboarding token, so host it on your own HTTP server and point DHCP at that.</li>
+          <li><b>ZTR:</b> mark a failed device for replacement; the new one ZTPs and receives the old one's config and image.</li>
+          <li><b>Your CloudVision lab (EVPN VXLAN 101):</b> watch for a factory-reset switch, its DHCP/bootfile, and where it lands in Inventory; then provision it into the EVPN fabric with a change control. This is the onboarding flow D2 tests.</li>
+          <li><b>DHCP options:</b> 67 (<code>bootfile-name</code>) is what EOS uses and should be a full URL. 66 (TFTP server name) only matters for a TFTP bootfile. Arista sends a vendor class (option 60) and client identifier, so a DHCP server can match Arista switches, a model or a MAC and hand out different bootfiles; option 43 carries vendor-specific data some platforms use (EOS ZTP doesn't need it).</li>
+          <li><b>Security:</b> an HTTP bootfile is unauthenticated, so anyone on the provisioning VLAN can hand a switch a config. Use HTTPS where your EOS and CloudVision support it, keep the ZTP VLAN isolated, give tokens a short life, and don't put secrets in bootstrap scripts.</li>
+        </ul></div>
+        <div class="part traps"><h4>ZTP troubleshooting and traps</h4><ul>
+          <li><b>Endless <code>DHCP_QUERY_FAIL</code>:</b> no DHCP reply. Check the port and VLAN, the DHCP relay (<code>ip helper-address</code>) if the server is remote, and that the scope has free addresses. <span class="pg">AW 13 p.58</span></li>
+          <li><b>Download fails:</b> the URL is wrong, the web server is unreachable from that subnet, or the bootfile is an IP or path without <code>http://</code>.</li>
+          <li><b>Script applied as config (or the reverse):</b> line one must be the shebang. A blank line or Windows line endings (CRLF) on line one break it. <span class="pg">AW 13 p.60</span></li>
+          <li><b>Script fails:</b> <code>EXEC_SCRIPT</code> error in the log. Test the script by hand in bash on a lab switch; check <code>script-exec-timeout</code> for large image copies.</li>
+          <li><b>Device never shows in CloudVision:</b> TerminAttr not started, wrong address or VRF, an expired token, or clock skew breaking TLS (2.1).</li>
+          <li>Typing config on a ZTP switch "doesn't stick": ZTP is still on. Cancel, disable, or let it finish. <span class="pg">AW 13 p.58</span></li>
+          <li>Lab vEOS/cEOS sitting in ZTP: <code>zerotouch disable</code>, or give it a startup-config (containerlab does).</li>
+        </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 13, Zero-Touch Provisioning: notes by page</h4><ul>
+          <li><b>p.58</b> ZTP triggers on a missing or zero-byte startup-config. The login banner explains that the switch won't be fully working until a config is downloaded or ZTP is cancelled. The author set a hostname, saved, and watched it disappear when ZTP retried; 4.21.1F and later refuse <code>wr</code> during ZTP. ZTP puts every interface in <code>no switchport</code>, sends DHCP on the connected ones and retries forever. Requirements: DHCP server, file server, connected interfaces.</li>
+          <li><b>p.59</b> <code>zerotouch cancel</code>: immediate reload, no confirm, ZTP skipped once; erase startup-config and it's back. <code>zerotouch disable</code>: immediate reload, ZTP gone for good. <code>zerotouch</code> options are cancel, disable and script-exec-timeout; <code>zerotouch enable</code> is refused. The state lives in <code>flash:zerotouch-config</code> (<code>DISABLE=True</code>); deleting that file and reloading brings ZTP back.</li>
+          <li><b>p.60</b> <code>cancel</code> works by writing disable-once / disable=nextReload to boot-config, which is removed at the next boot. Booting with ZTP: an Ubuntu dhcpd scope with <code>option bootfile-name</code> as an HTTP URL. The file is a startup-config, or a script if line one is a shebang. The sample script enables, copies the startup-config and EOS image from a web server, and sets <code>boot system</code>; no <code>wr</code> needed. The log shows download, script execution and reload.</li>
+          <li><b>p.61</b> The switch came back with its new hostname and EOS version, untouched. CloudVision has a built-in ZTP server (enable its DHCP or use your own); ztpserver from EOS+ is the other option. Some customers auto-archive configs so a replacement switch gets its predecessor's config. The author's training labs use an LLDP-based script so each switch configures itself from the port it's plugged into.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="13"></span><span data-ch="15"></span><a class="chip lab" data-lab="obj-2-2" href="#"><b>LAB</b>D2</a></div>
@@ -912,6 +985,7 @@ Role:Leaf AND NOT device:leaf4</pre></div>
 
   <div class="practice"><h3>Practice: D2</h3>
     <details class="q"><summary>A colleague added a banner on leaf2 via CLI. You must push a new configlet from CloudVision without losing it. What first?</summary><div class="a"><p>Reconcile leaf2. CloudVision builds a reconcile configlet with the banner line so the designed config includes it. Then add your configlet and push through a change control.</p></div></details>
+    <details class="q"><summary><span>A switch keeps "losing" the hostname you typed and logs <code>ZTP-5-DHCP_QUERY</code>. What's happening, and what are your options?</span></summary><div class="a"><p>It's in ZTP (no startup-config) and its retries wipe your changes. Use <code>zerotouch cancel</code> (skip ZTP once), <code>zerotouch disable</code> (permanent, via <code>flash:zerotouch-config</code>), or give it a DHCP bootfile. Both commands reload immediately.</p></div></details>
     <details class="q"><summary>Ten new leaves arrive factory-fresh. How do they get to the right config with no console work?</summary><div class="a"><p>ZTP: DHCP hands each switch a bootfile URL on CVP, they register into the Undefined container, you move each to its container (inheriting configlets), add device configlets or a builder, assign the image bundle, and execute the change control.</p></div></details>
     <details class="q"><summary>What does Submit in a Studios workspace actually do?</summary><div class="a"><p>It merges the workspace into mainline and creates a change control with one task per affected device. Nothing is pushed until that change control is approved and executed (unless auto-approve is configured).</p></div></details>
   </div>
