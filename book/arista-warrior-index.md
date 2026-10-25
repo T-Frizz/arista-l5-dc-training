@@ -13,3 +13,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 16 | Network Designs | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/16%5B%3Bvnd.vst.idref%3Dchapter-idm45591791393480%5D!/4/2/2%5Bnetwork_designs%5D/2/2/1:0) |
 | 18 | Buffers | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/18%5B%3Bvnd.vst.idref%3Dchapter-idm45591791346920%5D!/4/2/2%5Bbuffers%5D) |
 | 20 | Merchant Silicon | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/20%5B%3Bvnd.vst.idref%3Dchapter-idm45591791145880%5D!/4/2/2%5Bmerchant_silicon%5D) |
+| 22 | Fabric Speed | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/22%5B%3Bvnd.vst.idref%3Dchapter-idm45591791040040%5D!/4/2/2%5Bfabric_speed%5D) |
