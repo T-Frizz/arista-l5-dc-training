@@ -589,7 +589,8 @@ Role:Leaf AND NOT device:leaf4</pre></div>
         <div class="part"><h4>Know</h4><ul>
           <li><b>Scheduler</b> runs a CLI command on an interval and keeps rotating log files in flash. The built-in <code>tech-support</code> schedule runs hourly.</li>
           <li><b>Event monitor</b> records MAC, ARP, route, LACP, MRoute and other table changes into a local SQLite database you can query later.</li>
-          <li><b>Event manager</b> (<code>event-handler</code>) runs a bash or CLI action on a trigger: interface state, a log message, a counter threshold, boot, startup-config change, maintenance.</li>
+          <li><b>Event manager</b> (<code>event-handler</code>, Arista's equivalent of Cisco EEM) runs a bash action on a trigger: <code>on-boot</code>, <code>on-intf</code>, <code>on-logging</code> (regex), <code>on-counters</code>, <code>on-maintenance</code>, <code>on-startup-config</code>, <code>vm-tracer</code>. <span class="pg">AW 27 p.143</span></li>
+          <li>An <code>on-intf</code> action gets variables such as <code>$INTF</code>, <code>$OPERSTATE</code> and <code>$IP-PRIMARY</code>. For several CLI commands, put them in a script on flash and call it from the action. <span class="pg">AW 27 p.145</span></li>
           <li>Actions can call <code>FastCli</code>, send email (ch. 22), or write to flash.</li>
         </ul></div>
         <div class="part"><h4>Configure</h4>
@@ -604,22 +605,44 @@ show event-monitor route match-ip 10.10.10.0/24
    delay 5
    action bash FastCli -p15 -c "show interfaces Ethernet1" &gt; /mnt/flash/e1-down.txt
 
-<span class="k">event-handler</span> CRC
+<span class="k">event-handler</span> CPU-BUSY
    trigger on-counters
       poll interval 10
-      condition Ethernet1.statistics.inErrors &gt; 100
-   action bash logger -p local4.warning "CRC on Et1"</pre></div>
+      condition tcollector.proc.stat.cpu.type=idle &lt; 30
+      threshold 60 count 3      <span class="c">! 3 hits within 60 s</span>
+      action bash logger -p local4.warning "CPU idle below 30%"
+<span class="c">! counter names vary by platform:</span>
+<span class="c">! show event-handler trigger counters | grep idle</span>
+
+<span class="k">event-handler</span> SAVE-HISTORY
+   trigger on-startup-config
+   delay 0                    <span class="c">! catch rapid back-to-back saves</span>
+   action bash /mnt/flash/save-startup-copy.sh</pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
           <li><code>show schedule summary</code> · <code>dir flash:schedule/cfg-backup</code></li>
-          <li><code>show event-handler</code> (last trigger time, action status)</li>
+          <li><code>show event-handler</code> (trigger, action, last trigger time, counts; includes the built-in <code>DropCountersHandler</code>) <span class="pg">AW 27 p.147–148</span></li>
+          <li><code>show event-handler trigger counters</code> (counters available to <code>on-counters</code>)</li>
           <li><code>show event-monitor</code> sub-commands; <code>event-monitor interact</code> for SQL</li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
-          <li>No <code>delay</code>: a flapping link fires the handler repeatedly.</li>
+          <li>Pick <code>delay</code> on purpose: a longer delay damps a flapping link, while <code>delay 0</code> is needed when triggers come in quick succession, or some are missed. <span class="pg">AW 27 p.147</span></li>
+          <li>A handler only takes effect when you <code>exit</code> its config mode, and <code>on-boot</code> and <code>on-intf</code> handlers fire once at that moment. <span class="pg">AW 27 p.143, 146</span></li>
+          <li>EOS accepts a broken action without complaint. Check <code>show event-handler &lt;name&gt;</code> and the log (<code>EVENT_ACTION_FAILED</code> with an exit code). <span class="pg">AW 27 p.146</span></li>
+          <li><code>on-startup-config</code> fires on <code>write memory</code> or <code>copy running-config startup-config</code>, not when someone edits the file in bash. <span class="pg">AW 27 p.145</span></li>
           <li>Bash quoting inside <code>action bash</code>. Test the command in <code>bash</code> first.</li>
           <li>Scheduler interval is in minutes.</li>
+        </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 27, Event Manager: notes by page (real-world depth; a long shot on the exam)</h4><ul>
+          <li><b>p.143</b> An event handler is a trigger plus an action, with an optional delay. Example use: email the server team whenever the port to a flaky server goes down. The trigger types are listed above. <code>on-counters</code> works on ASIC and system counters, thousands of them, and the names depend on the platform: list them with <code>show event-handler trigger counters</code> and filter with grep.</li>
+          <li><b>p.145</b> <code>on-intf</code> can watch IP, IPv6, or operational status; listing more than one means "any of them". <code>on-logging</code> matches a regex against the log with a poll interval. <code>on-maintenance</code> fires on entering or leaving maintenance mode. Handler options: action, asynchronous, delay, threshold, timeout, and a free-text comment.</li>
+          <li><b>p.146</b> A typo in the action (in the book, an email command missing its recipient) is accepted. The handler fires, the log records the failed action and its exit code, and <code>show event-handler</code> shows the action string so you can spot the mistake.</li>
+          <li><b>p.146</b> An <code>on-counters</code> handler polls on an interval and compares a condition; <code>threshold</code> with a count requires several matches inside a window, so spiky values like CPU don't fire constantly. The condition can also be the output of a bash command. CloudVision is the better CPU monitor; this is the on-box fallback.</li>
+          <li><b>p.147</b> The book's <code>on-startup-config</code> example copies startup-config to a timestamped file on every save, a cheap change history. Rapid saves were missed until <code>delay 0</code> was set. Watch flash space if you do this, or copy the files off-box; AAA command accounting is the more complete answer.</li>
+          <li><b>p.147–148</b> <code>show event-handler</code> lists every handler with its trigger, action, polls, and when it last fired. EOS ships a built-in handler, <code>DropCountersHandler</code>, that polls drop counters and logs when they rise.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="24"></span><span data-ch="27"></span><span data-ch="28"></span><span data-ch="22"></span><a class="chip lab" data-lab="obj-3-1" href="#"><b>LAB</b>D3</a></div>
@@ -670,7 +693,7 @@ Topology    &gt; Settings &gt; custom hierarchy by tag</pre></div>
           <li><b>sFlow</b>: sampled packet headers plus counters to a collector. Good for top talkers.</li>
           <li><b>LANZ</b>: sub-millisecond queue-depth reporting from the ASIC. SNMP graphs average over 5 minutes and hide microbursts that fill buffers and drop packets. LANZ only reports; it doesn't change how traffic flows. Hardware-only, so not in vEOS or cEOS. <span class="pg">AW 23 p.123</span></li>
           <li><b>Port mirroring</b>: local SPAN, remote via GRE, or to the CPU so you can run tcpdump on the switch.</li>
-          <li><b>TAP aggregation</b>: turns a switch into a packet broker. Tap ports in, tool ports out, with filters.</li>
+          <li><b>TAP aggregation</b>: turns a switch into a packet broker. Tap ports (receive only) bring in copies of traffic; tool ports (transmit only) feed analyzers; aggregation groups join them. Real-world depth, not tested on the lab exam. <span class="pg">AW 26 p.140–141</span></li>
           <li><code>watch</code> re-runs a command every N seconds; useful on counters.</li>
         </ul></div>
         <div class="part"><h4>Configure</h4>
@@ -722,6 +745,25 @@ watch 2 show interfaces Ethernet1 counters rates</pre></div>
           <li><b>p.125</b> The Ingress Port-set column lists every port on the same ASIC core as the congested port, so it narrows down where the burst came in, not the exact port. <code>show platform jericho mapping</code> shows the port-to-core mapping on Jericho-based switches.</li>
           <li><b>p.126</b> For analysis, CloudVision graphs LANZ data, and it can be streamed out (Google Protocol Buffers). Without those, the <code>csv</code> keyword dumps up to the last 100,000 over-threshold events, oldest first; redirect it to a file on <code>flash:</code> and open it in a spreadsheet.</li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 26, Tap Aggregation: notes by page (real-world depth, not tested on the lab exam)</h4><ul>
+          <li><b>p.140</b> TapAgg lets a non-blocking Arista switch do the job of a dedicated packet broker: many taps or SPAN feeds in, a few analyzers out. <code>mode exclusive</code> takes the whole fixed switch out of normal switching (every port goes errdisabled until set to tap or tool), so never try it on a production switch. Modular chassis can use mixed mode and give only some linecards to TapAgg.</li>
+          <li><b>p.140</b> In TapAgg mode the switch stops sending STP, LLDP and similar control traffic on tap and tool ports, and MAC learning and flooding are off on them. ACLs, QoS and LAGs still work, and tap or tool ports can be port-channels.</li>
+          <li><b>p.140–141</b> A tool port can belong to several groups; a tap port has one default group. Tool ports use <code>switchport tool group set</code> (or <code>add</code>/<code>remove</code>); tap ports use <code>switchport tap default group</code>. Tap ports also have options for allowed VLANs, native VLAN, identity tagging and truncation.</li>
+          <li><b>p.141</b> <code>show tap aggregation groups</code> lists only ports that are connected, so a freshly configured group can look empty. Compare with <code>show interfaces status</code>.</li>
+          <li><b>p.141–142</b> The book's lab: two top-of-rack switches mirror a ping flow to the TapAgg switch, which sends each rack's group to one tool port. Changing the tool port's groups changes which rack's traffic the analyzer sees. On the tool switch, mirroring the port to <code>Cpu</code> and running tcpdump on <code>mirror0</code> shows the packets (the same method as above).</li>
+          <li><b>p.142</b> Most people manage TapAgg from the on-box Tap Aggregation Manager web GUI or from CloudVision, which also cover ACL filtering and traffic steering. The CLI is worth knowing for when those aren't reachable.</li>
+        </ul>
+<pre>tap aggregation
+   mode exclusive          <span class="c">! whole switch becomes a packet broker</span>
+interface Ethernet45
+   switchport mode tap
+   switchport tap default group RACK1
+interface Ethernet48
+   switchport mode tool
+   switchport tool group set RACK1 RACK2
+show tap aggregation groups</pre></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="23"></span><span data-ch="25"></span><span data-ch="26"></span><span data-ch="3"></span><a class="chip lab" data-lab="obj-3-3" href="#"><b>LAB</b>D3</a></div>
     </div>
