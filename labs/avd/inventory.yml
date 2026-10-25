@@ -1,0 +1,25 @@
+---
+# Ansible inventory for the L5 DC lab fabric (AVD eos_designs).
+# Management IPs match labs/topology/l5dc.clab.yml.
+all:
+  children:
+    L5DC:
+      children:
+        L5DC_FABRIC:
+          children:
+            L5DC_SPINES:
+              hosts:
+                spine1: {ansible_host: 172.100.100.11}
+                spine2: {ansible_host: 172.100.100.12}
+            L5DC_LEAVES:
+              hosts:
+                leaf1: {ansible_host: 172.100.100.21}
+                leaf2: {ansible_host: 172.100.100.22}
+                leaf3: {ansible_host: 172.100.100.23}
+                leaf4: {ansible_host: 172.100.100.24}
+        L5DC_NETWORK_SERVICES:
+          children:
+            L5DC_LEAVES:
+        L5DC_CONNECTED_ENDPOINTS:
+          children:
+            L5DC_LEAVES:

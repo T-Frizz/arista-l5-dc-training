@@ -1,0 +1,36 @@
+---
+# Connection and global settings for every fabric switch.
+ansible_user: admin
+ansible_password: admin
+ansible_network_os: arista.eos.eos
+ansible_connection: ansible.netcommon.httpapi
+ansible_httpapi_use_ssl: true
+ansible_httpapi_validate_certs: false
+ansible_become: true
+ansible_become_method: enable
+
+fabric_name: L5DC_FABRIC
+
+aaa_settings:
+  local_users:
+    - name: admin
+      privilege: 15
+      role: network-admin
+      sha512_password: "$6$l5dclab$cwiMlFNjjy0j7eQHiLqDJ3rJvYfxOBjnzm09/nIikVP.PSci6HEuauTE9TRoA4lRamjbC6XG1tzIbAlS4K81e0"
+
+mgmt_interface: Management0
+mgmt_interface_vrf: default
+mgmt_gateway: 172.100.100.1
+
+dns_settings:
+  servers:
+    - ip_address: 1.1.1.1
+      vrf: default
+ntp_settings:
+  servers:
+    - name: 0.pool.ntp.org
+
+# eAPI and gNMI stay on after a configure replace (applied through
+# structured_config on spine/l3leaf defaults in L5DC_FABRIC.yml).
+
+p2p_uplinks_mtu: 1500

@@ -1,0 +1,40 @@
+---
+# Tenant services: one VRF, two routed VLANs, one L2-only VLAN.
+tenants:
+  - name: TENANT_A
+    mac_vrf_vni_base: 10000
+    vrfs:
+      - name: TENANT-A
+        vrf_vni: 50001
+        mlag_ibgp_peering_vlan: 3001
+        vtep_diagnostic:
+          loopback: 100
+          loopback_ip_range: 10.255.10.0/27
+        svis:
+          - id: 10
+            name: APP
+            enabled: true
+            ip_address_virtual: 10.10.10.1/24
+          - id: 20
+            name: DB
+            enabled: true
+            ip_address_virtual: 10.20.20.1/24
+        # Border: eBGP to core1 from leaf3/leaf4 (capstone C2)
+        l3_interfaces:
+          - interfaces: [Ethernet6, Ethernet6]
+            nodes: [leaf3, leaf4]
+            ip_addresses: [10.255.254.0/31, 10.255.254.2/31]
+            enabled: true
+            description: P2P_core1
+        bgp_peers:
+          - ip_address: 10.255.254.1
+            description: core1
+            remote_as: 65000
+            nodes: [leaf3]
+          - ip_address: 10.255.254.3
+            description: core1
+            remote_as: 65000
+            nodes: [leaf4]
+    l2vlans:
+      - id: 30
+        name: L2_STRETCH

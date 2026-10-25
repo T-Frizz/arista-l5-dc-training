@@ -1,0 +1,21 @@
+---
+# Build the fabric configs with Ansible + AVD (same result as ../build.py).
+#   cd labs/avd
+#   ansible-galaxy collection install arista.avd
+#   pip install "pyavd[ansible]"          # match the collection version
+#   ansible-playbook -i inventory.yml playbooks/build.yml
+# Outputs go to labs/avd/intended/ (structured_configs, configs) and labs/avd/documentation/.
+- name: Build L5DC fabric configs
+  hosts: L5DC_FABRIC
+  gather_facts: false
+  connection: local
+  vars:
+    root_dir: "{{ playbook_dir }}/.."
+  tasks:
+    - name: Generate structured configuration (eos_designs)
+      ansible.builtin.import_role:
+        name: arista.avd.eos_designs
+
+    - name: Render EOS CLI and device documentation (eos_cli_config_gen)
+      ansible.builtin.import_role:
+        name: arista.avd.eos_cli_config_gen

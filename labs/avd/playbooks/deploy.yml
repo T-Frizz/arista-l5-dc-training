@@ -1,0 +1,16 @@
+---
+# Push the intended configs to the containerlab fabric over eAPI.
+# eos_config_deploy_eapi does a full config replace of each switch with
+# intended/configs/<host>.cfg, so the device ends up exactly as designed.
+#   ansible-playbook -i inventory.yml playbooks/deploy.yml
+#   ansible-playbook -i inventory.yml playbooks/deploy.yml --check --diff   # dry run
+#   ansible-playbook -i inventory.yml playbooks/deploy.yml --limit leaf1,leaf2   # one pair
+- name: Deploy L5DC fabric configs
+  hosts: L5DC_FABRIC
+  gather_facts: false
+  vars:
+    root_dir: "{{ playbook_dir }}/.."
+  tasks:
+    - name: Replace running-config with the AVD intended config
+      ansible.builtin.import_role:
+        name: arista.avd.eos_config_deploy_eapi

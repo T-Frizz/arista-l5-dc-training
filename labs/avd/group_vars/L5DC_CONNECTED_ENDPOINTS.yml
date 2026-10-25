@@ -1,0 +1,21 @@
+---
+# Dual-homed EOS "servers" on MLAG port-channels.
+servers:
+  - name: host1
+    adapters:
+      - endpoint_ports: [Ethernet1, Ethernet2]
+        switch_ports: [Ethernet5, Ethernet5]
+        switches: [leaf1, leaf2]
+        vlans: "10,20,30"
+        mode: trunk
+        port_channel:
+          mode: active
+  - name: host2
+    adapters:
+      - endpoint_ports: [Ethernet1, Ethernet2]
+        switch_ports: [Ethernet5, Ethernet5]
+        switches: [leaf3, leaf4]
+        vlans: "10,20,30"
+        mode: trunk
+        port_channel:
+          mode: active

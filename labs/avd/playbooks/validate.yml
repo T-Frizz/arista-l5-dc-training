@@ -1,0 +1,14 @@
+---
+# Post-deployment validation with ANTA, driven by AVD (role arista.avd.anta_runner,
+# the AVD 5.x/6.x successor of eos_validate_state). Reports land in labs/avd/reports/.
+#   ansible-playbook -i inventory.yml playbooks/validate.yml
+- name: Validate L5DC fabric state
+  hosts: L5DC_FABRIC
+  gather_facts: false
+  connection: local
+  vars:
+    root_dir: "{{ playbook_dir }}/.."
+  tasks:
+    - name: Run ANTA tests derived from the AVD structured configs
+      ansible.builtin.import_role:
+        name: arista.avd.anta_runner

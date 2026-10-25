@@ -1,0 +1,31 @@
+---
+# ANTA inventory for the six fabric switches (containerlab mgmt IPs).
+# Each device name is also an implicit ANTA tag, which is how the AVD-generated
+# per-device catalogs (filters: tags: [leaf1]) find the right device.
+#
+# ANTA takes one catalog file, so merge the six per-device catalogs first
+# (run from labs/avd):
+#   python3 -c "import glob; from anta.catalog import AntaCatalog as C; \
+#   print(C.merge_catalogs([C.parse(f) for f in sorted(glob.glob('intended/test_catalogs/*-catalog.yml'))]).dump().yaml())" \
+#   > fabric-catalog.yml
+#   anta nrfu -u admin -p admin -i anta-inventory.yml -c fabric-catalog.yml table --group-by device
+anta_inventory:
+  hosts:
+    - name: spine1
+      host: 172.100.100.11
+      tags: ["spine"]
+    - name: spine2
+      host: 172.100.100.12
+      tags: ["spine"]
+    - name: leaf1
+      host: 172.100.100.21
+      tags: ["leaf", "POD_A"]
+    - name: leaf2
+      host: 172.100.100.22
+      tags: ["leaf", "POD_A"]
+    - name: leaf3
+      host: 172.100.100.23
+      tags: ["leaf", "POD_B", "border"]
+    - name: leaf4
+      host: 172.100.100.24
+      tags: ["leaf", "POD_B", "border"]
