@@ -1,0 +1,1542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ACE L5 Data Center Study Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a field manual. Sticky domain rail on the left (top on phones), one reading column,
+   each objective is a "spec sheet": know / configure / verify / traps / sources. */
+:root{
+  --paper:#f2f4f3; --sheet:#ffffff; --ink:#17212b; --muted:#52606d; --rule:#d4dbd9;
+  --accent:#a85f00;          /* port-LED amber */
+  --accent-soft:#f6e7d0;
+  --link:#0b5e78;
+  --code-bg:#1b2530; --code-fg:#dfe7ec; --code-dim:#8fa3b1; --code-key:#f2b45c;
+  --ok:#2f7d4f; --warn:#a33a2a; --warn-soft:#f7e3df;
+  --font-display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --step--1:.8125rem; --step-0:1rem; --step-1:1.2rem; --step-2:1.55rem; --step-3:2.1rem; --step-4:2.9rem;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#11171d; --sheet:#182129; --ink:#e3e9ed; --muted:#9aa9b5; --rule:#2c3944;
+  --accent:#f0a43a; --accent-soft:#3a2b14; --link:#6fc3de;
+  --code-bg:#0b1015; --code-fg:#dfe7ec; --code-dim:#7d909e; --code-key:#f2b45c;
+  --ok:#5fc08a; --warn:#f08a77; --warn-soft:#3a1f1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#11171d; --sheet:#182129; --ink:#e3e9ed; --muted:#9aa9b5; --rule:#2c3944;
+  --accent:#f0a43a; --accent-soft:#3a2b14; --link:#6fc3de;
+  --code-bg:#0b1015; --code-fg:#dfe7ec; --code-dim:#7d909e; --code-key:#f2b45c;
+  --ok:#5fc08a; --warn:#f08a77; --warn-soft:#3a1f1a; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:var(--step-0);line-height:1.6}
+a{color:var(--link);text-underline-offset:2px}
+a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+h1,h2,h3,h4{font-family:var(--font-display);line-height:1.1;text-wrap:balance;margin:0}
+code,pre,kbd{font-family:var(--font-mono)}
+p{margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* Header */
+.mast{border-bottom:1px solid var(--rule);background:var(--sheet)}
+.mast .wrap{padding-block:28px 24px;display:grid;gap:18px}
+.eyebrow{font-family:var(--font-mono);font-size:var(--step--1);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.mast h1{font-size:var(--step-4);font-weight:700;letter-spacing:.005em}
+.mast .lede{max-width:68ch;color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.facts div{background:var(--sheet);padding:10px 12px;display:grid;gap:2px}
+.facts dt{font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.facts dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* Shell */
+.shell{display:grid;grid-template-columns:250px minmax(0,1fr);gap:40px;padding-block:32px 80px}
+nav.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);align-self:start;max-height:calc(100vh - 32px);overflow:auto;font-size:.9rem;display:grid;gap:14px}
+.rail h2{font-size:var(--step-1);font-weight:600;letter-spacing:.02em}
+.rail ol{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.rail a{display:grid;grid-template-columns:2.4em 1fr auto;gap:6px;align-items:baseline;text-decoration:none;color:var(--ink);padding:5px 8px;border-radius:4px}
+.rail a:hover{background:var(--accent-soft)}
+.rail a .dn{font-family:var(--font-mono);font-size:.78rem;color:var(--accent)}
+.rail a .pct{font-family:var(--font-mono);font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.rail .group{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:8px 8px 2px}
+.meter{height:6px;background:var(--rule);border-radius:3px;overflow:hidden}
+.meter span{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+.rail .total{display:grid;gap:6px;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet)}
+.rail .total small{color:var(--muted)}
+@media (max-width:900px){
+  .shell{grid-template-columns:minmax(0,1fr);gap:24px}
+  nav.rail{position:static;max-height:none}
+  .rail ol{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+}
+
+main{display:grid;gap:56px;min-width:0}
+section.block{display:grid;gap:18px;min-width:0}
+.block > h2{font-size:var(--step-3);font-weight:700}
+.prose{display:grid;gap:12px;max-width:72ch}
+.prose ul,.prose ol{margin:0;padding-left:1.25em;display:grid;gap:6px}
+
+/* Domain header */
+.dom-head{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;align-items:end;border-bottom:3px solid var(--ink);padding-bottom:12px}
+.dom-head .num{font-family:var(--font-display);font-size:4rem;font-weight:700;line-height:.85;color:var(--accent)}
+.dom-head h2{font-size:var(--step-3);font-weight:700}
+.dom-head .exam{font-family:var(--font-mono);font-size:var(--step--1);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.dom-head .intro{grid-column:1/-1;max-width:72ch;color:var(--muted)}
+
+/* Objective sheet */
+.obj{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;display:grid;min-width:0}
+.obj > header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;padding:16px 18px 12px;border-bottom:1px solid var(--rule)}
+.obj .oid{font-family:var(--font-mono);font-weight:500;color:var(--accent);font-size:.95rem}
+.obj h3{font-size:var(--step-2);font-weight:600;flex:1 1 300px}
+.obj .conf{display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted);cursor:pointer;user-select:none}
+.obj .conf input{accent-color:var(--accent);width:16px;height:16px}
+.obj .body{padding:16px 18px 18px;display:grid;gap:16px;min-width:0}
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px}
+@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}}
+.part{display:grid;gap:6px;min-width:0;align-content:start}
+.part > h4{font-family:var(--font-mono);font-size:.72rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.part ul{margin:0;padding-left:1.15em;display:grid;gap:5px}
+.part li{max-width:70ch}
+.traps{background:var(--warn-soft);border-radius:6px;padding:10px 14px}
+.traps > h4{color:var(--warn)}
+pre{margin:0;background:var(--code-bg);color:var(--code-fg);border-radius:6px;padding:12px 14px;overflow-x:auto;font-size:.82rem;line-height:1.55;tab-size:3}
+pre .c{color:var(--code-dim)}
+pre .k{color:var(--code-key)}
+:not(pre) > code{font-size:.86em;background:var(--accent-soft);padding:.05em .3em;border-radius:3px;overflow-wrap:anywhere}
+.refs{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding-top:4px;border-top:1px dashed var(--rule);font-size:.85rem}
+.refs .lbl{font-family:var(--font-mono);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-right:2px}
+.chip{display:inline-flex;align-items:baseline;gap:5px;border:1px solid var(--rule);border-radius:999px;padding:2px 10px;text-decoration:none;color:var(--ink);background:var(--paper);white-space:nowrap}
+.chip:hover{border-color:var(--accent)}
+.chip b{font-family:var(--font-mono);font-weight:500;font-size:.75rem;color:var(--accent)}
+.chip.lab{background:var(--accent);color:var(--sheet);border-color:var(--accent);font-weight:600}
+.chip.lab b{color:var(--sheet)}
+
+/* Practice */
+.practice{display:grid;gap:8px}
+.practice > h3{font-size:var(--step-1);font-weight:600}
+details.q{background:var(--sheet);border:1px solid var(--rule);border-radius:6px}
+details.q summary{cursor:pointer;padding:10px 14px;list-style:none;display:grid;grid-template-columns:auto 1fr;gap:10px}
+details.q summary::-webkit-details-marker{display:none}
+details.q summary::before{content:"Q";font-family:var(--font-mono);color:var(--accent);font-weight:500}
+details.q[open] summary{border-bottom:1px solid var(--rule)}
+details.q .a{padding:10px 14px 12px 38px;display:grid;gap:8px;color:var(--ink)}
+
+/* Tables */
+.tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--sheet)}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--rule)}
+th{font-family:var(--font-mono);font-weight:500;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:var(--paper)}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+.num{font-variant-numeric:tabular-nums}
+
+/* Plan */
+.weeks{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.week{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;display:grid;gap:6px;align-content:start}
+.week .wk{font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--accent)}
+.week h3{font-size:var(--step-1);font-weight:600}
+.week ul{margin:0;padding-left:1.1em;display:grid;gap:3px;font-size:.9rem}
+
+.note{border-left:3px solid var(--accent);padding:4px 0 4px 14px;color:var(--muted);max-width:72ch}
+.topo{overflow-x:auto;background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:12px}
+.topo svg{display:block;min-width:620px;width:100%;height:auto}
+.topo text{font-family:var(--font-mono);font-size:11px;fill:var(--ink)}
+.topo .sub{fill:var(--muted);font-size:10px}
+.topo .box{fill:var(--paper);stroke:var(--ink);stroke-width:1.2}
+.topo .box.spine{fill:var(--accent-soft);stroke:var(--accent)}
+.topo .ln{stroke:var(--muted);stroke-width:1.2;fill:none}
+.topo .pl{stroke:var(--accent);stroke-width:2.5;fill:none}
+footer{border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem}
+footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap">
+    <p class="eyebrow">Arista ACE · Professional · Data Center</p>
+    <h1>ACE L5 Data Center Study Guide</h1>
+    <p class="lede">Seven exam domains, broken into objectives. Each objective gives you what to know, the EOS config to type, the commands that prove it works, the traps that cost points, and where to read more in <i>Arista Warrior</i> (2nd ed.), the EOS manual, and AVD. Every objective links to its lab.</p>
+    <dl class="facts">
+      <div><dt>Credential</dt><dd>ACE Professional DC (AN-DC-PR)</dd></div>
+      <div><dt>Route A</dt><dd>AN-DC-OP01 + AN-DC-EN01</dd></div>
+      <div><dt>Route B</dt><dd>AN-DC-PR01 (one sitting)</dd></div>
+      <div><dt>Format</dt><dd>Hands-on lab, open book</dd></div>
+      <div><dt>Time</dt><dd>4 h per exam</dd></div>
+      <div><dt>Retake wait</dt><dd>14 days</dd></div>
+    </dl>
+  </div>
+</header>
+
+<div class="wrap shell">
+  <nav class="rail" aria-label="Contents">
+    <div class="total">
+      <strong>Your confidence</strong>
+      <div class="meter"><span id="meter-all"></span></div>
+      <small id="meter-all-txt">Tick "I can do this" on each objective. Saved in this browser.</small>
+    </div>
+    <div>
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#exam"><span class="dn">·</span><span>The exam</span><span></span></a></li>
+        <li><a href="#plan"><span class="dn">·</span><span>Six-week plan</span><span></span></a></li>
+        <li class="group">Operations · OP01</li>
+        <li><a href="#d1"><span class="dn">D1</span><span>EOS Management</span><span class="pct" data-pct="1"></span></a></li>
+        <li><a href="#d2"><span class="dn">D2</span><span>CloudVision Operations</span><span class="pct" data-pct="2"></span></a></li>
+        <li><a href="#d3"><span class="dn">D3</span><span>Monitoring &amp; Troubleshooting</span><span class="pct" data-pct="3"></span></a></li>
+        <li class="group">Engineering · EN01</li>
+        <li><a href="#d4"><span class="dn">D4</span><span>L2 &amp; L3 Designs</span><span class="pct" data-pct="4"></span></a></li>
+        <li><a href="#d5"><span class="dn">D5</span><span>Underlay Protocols</span><span class="pct" data-pct="5"></span></a></li>
+        <li><a href="#d6"><span class="dn">D6</span><span>Overlay Protocols</span><span class="pct" data-pct="6"></span></a></li>
+        <li><a href="#d7"><span class="dn">D7</span><span>Automation &amp; Management</span><span class="pct" data-pct="7"></span></a></li>
+        <li class="group">Reference</li>
+        <li><a href="#walk"><span class="dn">R1</span><span>EVPN packet walk</span><span></span></a></li>
+        <li><a href="#tshoot"><span class="dn">R2</span><span>Troubleshooting ladder</span><span></span></a></li>
+        <li><a href="#cheat"><span class="dn">R3</span><span>Show-command sheet</span><span></span></a></li>
+        <li><a href="#sources"><span class="dn">R4</span><span>Sources</span><span></span></a></li>
+      </ol>
+    </div>
+  </nav>
+
+<main>
+
+<!-- ============ EXAM ============ -->
+<section class="block" id="exam">
+  <h2>The exam</h2>
+  <div class="prose">
+    <p>L5 Data Center is Arista's <b>ACE Professional – Data Center</b> credential. You can take the two Specialist exams (Operations AN-DC-OP01 and Engineering AN-DC-EN01) and get the Professional badge automatically, or sit the single Professional exam AN-DC-PR01, which mixes both. Each is a timed, proctored, open-book lab. You get a scenario in the same virtual environment the Arista Academy labs use: EOS switches with a CloudVision instance, and a list of tasks to build, fix, and verify. Arista does not publish weights, task counts, or the pass mark.</p>
+    <p>That shapes how to study. You are graded on the end state of the devices, not on what you can recite. Speed at the CLI, a habit of verifying every task, and knowing where to look things up matter more than memorized trivia.</p>
+  </div>
+  <div class="cols">
+    <div class="part">
+      <h4>How to sit a hands-on exam</h4>
+      <ul>
+        <li>Read every task before typing. Note dependencies (an EVPN task fails if the underlay task before it is wrong).</li>
+        <li>Draw the topology and fill in ASNs, loopbacks, VNIs and VRFs on scratch paper in the first ten minutes.</li>
+        <li>Make changes in a <code>configure session</code> so you can review the diff and abort a mistake.</li>
+        <li>Verify each task with its show command before moving on. Then <code>write memory</code>.</li>
+        <li>Never break management access or the CloudVision connection (TerminAttr, Management1, the MGMT VRF).</li>
+        <li>If a task asks for CloudVision, do it in CloudVision. A correct config pushed from the CLI shows up as out of compliance and may not score.</li>
+        <li>Skip a stuck task and come back. Leave 20 minutes at the end to re-verify everything.</li>
+      </ul>
+    </div>
+    <div class="part">
+      <h4>Open book, used well</h4>
+      <ul>
+        <li>The EOS User Manual is searchable. Practise finding a feature's config chapter in under a minute.</li>
+        <li>On the switch, <code>?</code> and <code>show running-config all | section &lt;feature&gt;</code> show every option and its default.</li>
+        <li><code>show running-config | section router bgp</code> and <code>show active</code> (inside a mode) keep you oriented.</li>
+        <li>This guide's <a href="#cheat">show-command sheet</a> is meant to be open beside the exam.</li>
+        <li>Check the current exam policies on <a href="https://www.training.arista.com/" target="_blank" rel="noopener">training.arista.com</a> for what materials are allowed.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="part">
+    <h4>Reference values used in this guide and the lab guide</h4>
+    <div class="topo" role="img" aria-label="Lab topology: two spines in AS 65100 connect to four leaves in two MLAG pairs, AS 65101 and 65102. Each pair has a host and pair two connects to an external router.">
+      <svg viewBox="0 0 760 270" xmlns="http://www.w3.org/2000/svg">
+        <!-- links -->
+        <g class="ln">
+          <path d="M230 60 L95 150"/><path d="M230 60 L255 150"/><path d="M230 60 L455 150"/><path d="M230 60 L615 150"/>
+          <path d="M530 60 L95 150"/><path d="M530 60 L255 150"/><path d="M530 60 L455 150"/><path d="M530 60 L615 150"/>
+          <path d="M95 182 L175 230"/><path d="M255 182 L175 230"/>
+          <path d="M455 182 L535 230"/><path d="M615 182 L535 230"/>
+          <path d="M655 166 L720 166"/>
+        </g>
+        <path class="pl" d="M140 166 L210 166"/><path class="pl" d="M500 166 L570 166"/>
+        <!-- spines -->
+        <rect class="box spine" x="170" y="28" width="120" height="34" rx="4"/><text x="230" y="44" text-anchor="middle">spine1</text><text class="sub" x="230" y="56" text-anchor="middle">AS 65100 · 10.255.0.1</text>
+        <rect class="box spine" x="470" y="28" width="120" height="34" rx="4"/><text x="530" y="44" text-anchor="middle">spine2</text><text class="sub" x="530" y="56" text-anchor="middle">AS 65100 · 10.255.0.2</text>
+        <!-- leaves -->
+        <rect class="box" x="40" y="150" width="110" height="34" rx="4"/><text x="95" y="166" text-anchor="middle">leaf1</text><text class="sub" x="95" y="178" text-anchor="middle">10.255.0.3</text>
+        <rect class="box" x="200" y="150" width="110" height="34" rx="4"/><text x="255" y="166" text-anchor="middle">leaf2</text><text class="sub" x="255" y="178" text-anchor="middle">10.255.0.4</text>
+        <rect class="box" x="400" y="150" width="110" height="34" rx="4"/><text x="455" y="166" text-anchor="middle">leaf3</text><text class="sub" x="455" y="178" text-anchor="middle">10.255.0.5</text>
+        <rect class="box" x="560" y="150" width="110" height="34" rx="4"/><text x="615" y="166" text-anchor="middle">leaf4</text><text class="sub" x="615" y="178" text-anchor="middle">10.255.0.6</text>
+        <text class="sub" x="175" y="140" text-anchor="middle">MLAG pair · AS 65101 · VTEP 10.255.1.3</text>
+        <text class="sub" x="535" y="140" text-anchor="middle">MLAG pair · AS 65102 · VTEP 10.255.1.5</text>
+        <!-- hosts -->
+        <rect class="box" x="130" y="230" width="90" height="28" rx="4"/><text x="175" y="248" text-anchor="middle">host1</text>
+        <rect class="box" x="490" y="230" width="90" height="28" rx="4"/><text x="535" y="248" text-anchor="middle">host2</text>
+        <rect class="box" x="690" y="150" width="62" height="34" rx="4"/><text x="721" y="171" text-anchor="middle">ext-rtr</text>
+      </svg>
+    </div>
+    <div class="tbl"><table>
+      <thead><tr><th>Item</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Spine ASN / leaf-pair ASNs</td><td class="num">65100 / 65101 (leaf1-2), 65102 (leaf3-4)</td></tr>
+        <tr><td>Router ID / overlay peering (Loopback0)</td><td class="num">10.255.0.0/24</td></tr>
+        <tr><td>VTEP source (Loopback1, shared per MLAG pair)</td><td class="num">10.255.1.0/24</td></tr>
+        <tr><td>Spine–leaf point-to-point links</td><td class="num">10.255.255.0/24, carved into /31s</td></tr>
+        <tr><td>Tenant VRF / L3 VNI</td><td class="num">TENANT-A / 50001</td></tr>
+        <tr><td>VLANs → VNIs</td><td class="num">10 → 10010 and 20 → 10020 (routed); 30 → 10030 (L2 only)</td></tr>
+        <tr><td>MLAG peer link / iBGP peering</td><td class="num">VLAN 4094 and VLAN 4093, 10.255.252.0/24</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============ PLAN ============ -->
+<section class="block" id="plan">
+  <h2>Six-week plan</h2>
+  <p class="note">About 8–10 hours a week. Each week reads the chapters, works the objectives here, then does the matching labs. Repeat a lab until you can do it from a blank config without notes.</p>
+  <div class="weeks">
+    <div class="week"><p class="wk">Week 1</p><h3>EOS and L2 foundations</h3><ul><li>D1 all, D4.1</li><li>Warrior ch. 7–11, 17–19</li><li>Labs D1, D4 (L2LS part)</li></ul></div>
+    <div class="week"><p class="wk">Week 2</p><h3>Routed underlay</h3><ul><li>D4.2–4.3, D5 all</li><li>Warrior ch. 2, 18, 20</li><li>Lab D5: eBGP underlay, BFD, ECMP</li></ul></div>
+    <div class="week"><p class="wk">Week 3</p><h3>VXLAN and EVPN</h3><ul><li>D6 all, then <a href="#walk">R1</a></li><li>Warrior ch. 21</li><li>Lab D6, three times from scratch</li></ul></div>
+    <div class="week"><p class="wk">Week 4</p><h3>CloudVision</h3><ul><li>D2 all, D7.1–7.2</li><li>Warrior ch. 13, 15</li><li>Labs D2, D7 (Studios)</li></ul></div>
+    <div class="week"><p class="wk">Week 5</p><h3>Operate and fix</h3><ul><li>D3 all, <a href="#tshoot">R2</a></li><li>Warrior ch. 22–29</li><li>Lab D3, break/fix drills</li></ul></div>
+    <div class="week"><p class="wk">Week 6</p><h3>As code, then mock exam</h3><ul><li>D7.3 (AVD, ANTA, eAPI)</li><li>Warrior ch. 12, 30–32</li><li>Capstone under a 4-hour timer</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ D1 ============ -->
+<section class="block" id="d1">
+  <div class="dom-head"><span class="num">D1</span><div><p class="exam">Operations exam · AN-DC-OP01</p><h2>EOS Management</h2></div>
+  <p class="intro">Changing a running switch safely, upgrading it without an outage, and getting it back when it won't boot. EOS keeps all state in SysDB and runs each feature as a separate agent, which is why an agent can restart without a reload and why config sessions and rollback work so well.</p></div>
+
+  <article class="obj" id="obj-1-1" data-dom="1">
+    <header><span class="oid">1.1</span><h3>EOS operations and safe change</h3><label class="conf"><input type="checkbox" id="c-1-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>SysDB is the central state database. Agents (Bgp, Stp, Lag…) publish to it and read from it. <code>show agent</code>, <code>show processes top</code>.</li>
+          <li>EOS is Linux. <code>bash</code> drops you to a shell; <code>FastCli -p 15 -c "cmd"</code> runs CLI from bash.</li>
+          <li>Config sessions stage changes, show a diff, and commit atomically. <code>commit timer</code> rolls back unless you confirm.</li>
+          <li>Checkpoints save a named copy of the running config; <code>configure replace</code> swaps the whole running config for another file and applies only the differences.</li>
+          <li>Maintenance mode drains traffic from a switch before work: BGP sends a lower preference or withdraws, MLAG and interfaces can be quiesced.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre><span class="k">configure session</span> add-vlan40
+   vlan 40
+      name APP
+   interface Ethernet3
+      switchport trunk allowed vlan add 40
+   <span class="k">show session-config diffs</span>
+   <span class="k">commit timer</span> 00:05:00      <span class="c">! auto-rollback in 5 min</span>
+<span class="c">! still reachable? confirm it:</span>
+<span class="k">configure session</span> add-vlan40 commit
+
+<span class="k">configure checkpoint save</span> pre-change
+<span class="k">configure replace</span> checkpoint:pre-change
+<span class="c">! drain a switch before work</span>
+maintenance
+   unit System
+      quiesce</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show configuration sessions detail</code></li>
+          <li><code>show config checkpoints</code> · <code>show running-config diffs</code></li>
+          <li><code>show maintenance</code> · <code>show maintenance summary</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Forgetting <code>write memory</code>. A reload or a CloudVision reconcile will wipe unsaved work.</li>
+          <li>Leaving a session uncommitted. Changes in a session do nothing until <code>commit</code>.</li>
+          <li><code>configure replace</code> with a file that lacks management config drops your access.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="7"></span><span data-ch="8"></span><span data-ch="9"></span><a class="chip" href="https://www.arista.com/en/um-eos" target="_blank" rel="noopener"><b>EOS</b>User Manual</a><a class="chip lab" data-lab="obj-1-1" href="#"><b>LAB</b>D1</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-1-2" data-dom="1">
+    <header><span class="oid">1.2</span><h3>EOS upgrades: standard, SSU, MLAG ISSU</h3><label class="conf"><input type="checkbox" id="c-1-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Standard upgrade: copy the .swi to flash, check its hash, set <code>boot system</code>, save, reload. Outage equals reload time.</li>
+          <li>Smart System Upgrade (SSU, <code>reload fast-boot</code>) keeps the data plane forwarding while the control plane restarts on supported fixed platforms. Check first with <code>show reload fast-boot</code>.</li>
+          <li>MLAG ISSU: upgrade one peer at a time. Hosts stay up on the other peer. Check <code>show mlag issu compatibility</code>, then upgrade, wait for MLAG <i>active-full</i> and for reload-delay to expire, then do the peer.</li>
+          <li>Chassis with two supervisors: upgrade the standby, switch over (SSO), then the other.</li>
+          <li>CloudVision upgrades use an image bundle assigned to a container or device, which creates a task you run in a change control.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre>copy scp://user@10.0.0.10/EOS-4.32.2F.swi flash:
+<span class="k">verify /sha512</span> flash:EOS-4.32.2F.swi
+<span class="k">boot system</span> flash:EOS-4.32.2F.swi
+write memory
+<span class="k">show boot-config</span>
+reload                  <span class="c">! or: reload fast-boot</span>
+
+<span class="c">! MLAG pair, before each peer</span>
+<span class="k">show mlag issu compatibility</span> flash:EOS-4.32.2F.swi
+show mlag detail | include state|reload</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show version</code> · <code>show boot-config</code></li>
+          <li><code>show mlag</code> (state: active, negotiation: connected, ports active-full)</li>
+          <li><code>show mlag interfaces detail</code> during reload-delay</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Upgrading both MLAG peers at once, or the second before the first has finished its reload-delay.</li>
+          <li>Not saving after <code>boot system</code>; the old image boots again.</li>
+          <li>Not enough flash. Check <code>dir flash:</code> and delete old images first.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="10"></span><span data-ch="18"></span><span data-ch="15"></span><a class="chip lab" data-lab="obj-1-2" href="#"><b>LAB</b>D1</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-1-3" data-dom="1">
+    <header><span class="oid">1.3</span><h3>Extensions, Aboot and recovery</h3><label class="conf"><input type="checkbox" id="c-1-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Extensions (.swix/.rpm) add features or hotfixes. Install, then copy to boot-extensions so they survive a reload. TerminAttr is an extension.</li>
+          <li>Aboot is the bootloader. Press Ctrl-C at boot to get the <code>Aboot#</code> shell and boot an image by hand.</li>
+          <li>Lost password: from Aboot, rename <code>/mnt/flash/startup-config</code> and boot. The switch comes up with no config.</li>
+          <li><code>fullrecover</code> in Aboot wipes flash back to factory. Last resort.</li>
+          <li>Health: <code>show version</code> (free memory), <code>dir flash:</code>, <code>show agent logs crash</code>, <code>show logging</code>.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre>copy https://10.0.0.10/TerminAttr-1.30.swix extension:
+<span class="k">extension</span> TerminAttr-1.30.swix
+<span class="k">copy installed-extensions boot-extensions</span>
+show extensions
+
+<span class="c">! Aboot shell (Ctrl-C during boot)</span>
+Aboot# cd /mnt/flash
+Aboot# mv startup-config startup-config.old
+Aboot# boot flash:EOS-4.32.2F.swi</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show extensions</code> (status should be A, I: available and installed)</li>
+          <li><code>show boot-extensions</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Installing an extension but not adding it to boot-extensions.</li>
+          <li>Extension built for a different EOS architecture (32/64-bit) shows as not installable.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="14"></span><span data-ch="16"></span><span data-ch="12"></span><a class="chip lab" data-lab="obj-1-3" href="#"><b>LAB</b>D1</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D1</h3>
+    <details class="q"><summary>You must change an uplink's VLAN list remotely and might lock yourself out. What do you type?</summary><div class="a"><p>Use <code>configure session NAME</code>, make the change, check <code>show session-config diffs</code>, then <code>commit timer 00:05:00</code>. If you can still reach the switch, run <code>configure session NAME commit</code> to keep it. If not, it rolls back by itself.</p></div></details>
+    <details class="q"><summary>leaf1 and leaf2 are an MLAG pair. In what order, and when, do you upgrade them?</summary><div class="a"><p>Check ISSU compatibility. Upgrade one peer (often the secondary). Wait until <code>show mlag</code> is active/connected, all MLAG ports are active-full, and reload-delay has expired. Then upgrade the other peer. Hosts dual-homed by LACP stay up throughout.</p></div></details>
+    <details class="q"><summary>A hotfix extension is installed but gone after a reload. Why?</summary><div class="a"><p>It was never copied into boot-extensions. Run <code>copy installed-extensions boot-extensions</code>.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D2 ============ -->
+<section class="block" id="d2">
+  <div class="dom-head"><span class="num">D2</span><div><p class="exam">Operations exam · AN-DC-OP01</p><h2>CloudVision Operations</h2></div>
+  <p class="intro">CloudVision is where you onboard devices, push config through reviewed change controls, and roll back. There are two provisioning models: the classic one (containers and configlets) and Studios (workspaces, inputs and tags). The exam can ask for either.</p></div>
+
+  <article class="obj" id="obj-2-1" data-dom="2">
+    <header><span class="oid">2.1</span><h3>CloudVision overview, setup and onboarding</h3><label class="conf"><input type="checkbox" id="c-2-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>CVP is on-premises (single node or a three-node cluster). CVaaS is Arista's hosted service. Same features, different onboarding address and token.</li>
+          <li>Devices stream state to CloudVision through the TerminAttr agent over gRPC. Provisioning uses eAPI or gNMI back to the device.</li>
+          <li>Onboarding: install TerminAttr, configure it with the CV address, auth token and VRF, then the device appears in Inventory.</li>
+          <li>Admin tasks: backup and restore (<code>cvpi backup</code>), upgrades, licensing, user roles and service accounts.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre><span class="k">daemon TerminAttr</span>
+   exec /usr/bin/TerminAttr -cvaddr=192.168.0.5:9910
+      -cvauth=token,/tmp/token -cvvrf=MGMT
+      -smashexcludes=ale,flexCounter,hardware,kni,pulse,strata
+      -ingestexclude=/Sysdb/cell/1/agent,/Sysdb/cell/2/agent
+      -taillogs
+   no shutdown
+<span class="c">! CVaaS: -cvaddr=apiserver.arista.io:443</span>
+<span class="c">!        -cvauth=token-secure,/tmp/cv-onboarding-token</span>
+
+management api http-commands
+   no shutdown
+   vrf MGMT
+      no shutdown</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show daemon TerminAttr</code> (look for "connected")</li>
+          <li><code>show management api http-commands</code></li>
+          <li>CloudVision: Devices &gt; Inventory shows the device as streaming</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Wrong VRF in <code>-cvvrf</code>; TerminAttr can't reach CV over the default VRF.</li>
+          <li>Token file missing or expired. Onboarding tokens are time-limited.</li>
+          <li>Clock skew breaks TLS. Configure NTP first.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><a class="chip" href="https://www.arista.com/en/cg-cv/cv-introduction-to-cloudvision" target="_blank" rel="noopener"><b>CV</b>CloudVision guide</a><a class="chip lab" data-lab="obj-2-1" href="#"><b>LAB</b>D2</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-2-2" data-dom="2">
+    <header><span class="oid">2.2</span><h3>Provisioning: containers, configlets, change control, rollback, ZTP</h3><label class="conf"><input type="checkbox" id="c-2-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><b>Containers</b> form a tree under Tenant. Configlets on a container apply to every device below it. Device configlets apply to one device.</li>
+          <li><b>Designed config</b> is the merge of all configlets that apply to a device. <b>Running config</b> is what the device has. CloudVision flags differences as out of compliance.</li>
+          <li><b>Reconcile</b> captures running-config lines that no configlet owns into a reconcile configlet, so the next push won't remove them.</li>
+          <li>Any change creates a <b>task</b>. Tasks go into a <b>change control</b> with stages run in series or in parallel, a review, an approval, and execution.</li>
+          <li><b>Snapshots</b> capture show-command output before and after a change. <b>Rollback</b> returns a device (or the whole network) to an earlier config and image.</li>
+          <li><b>Configlet builders</b> are Python with a form that generate per-device configlets (hostname, IPs) from inputs.</li>
+          <li><b>Image bundles</b> hold an EOS image plus extensions and are assigned like configlets.</li>
+          <li><b>ZTP</b>: a factory-default switch gets DHCP with a bootfile URL pointing to CVP, registers, and lands in the Undefined container. <b>ZTR</b> (replacement) gives a new switch the config of the one it replaces.</li>
+        </ul></div>
+        <div class="part"><h4>Workflow</h4>
+<pre><span class="c"># Classic provisioning, in order</span>
+1  Provisioning &gt; Network Provisioning
+2  Move device: Undefined -&gt; DC1/Leaf
+3  Container "Leaf": add configlet BASE-LEAF
+4  Device leaf1: add configlet leaf1-INTF
+5  Review designed vs running, Save
+6  Tasks -&gt; Create Change Control
+7  Stages: series or parallel, add snapshot
+8  Review &amp; approve -&gt; Execute
+9  Compare snapshots; roll back if needed
+
+<span class="c"># ZTP DHCP (ISC dhcpd)</span>
+option bootfile-name
+  "http://192.168.0.5/ztp/bootstrap";</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li>Inventory compliance column is green for the devices you touched.</li>
+          <li>Change control shows every task as completed.</li>
+          <li>On the device: <code>show running-config</code> matches the designed config.</li>
+          <li>ZTP: <code>show zerotouch</code> on the switch, and the device appears in Undefined.</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Making the change on the CLI, then pushing from CloudVision: CloudVision removes lines it doesn't know. Reconcile first.</li>
+          <li>Creating tasks but never executing the change control.</li>
+          <li>Two configlets that set the same line with different values; the last one in order wins.</li>
+          <li>Moving a device to a new container drops the old container's configlets.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="13"></span><span data-ch="15"></span><a class="chip lab" data-lab="obj-2-2" href="#"><b>LAB</b>D2</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-2-3" data-dom="2">
+    <header><span class="oid">2.3</span><h3>Studios for operations: workspaces, tags, Day-2</h3><label class="conf"><input type="checkbox" id="c-2-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Studios turn intent (inputs in a form) into config. A <b>workspace</b> is a sandbox, like a git branch: you edit studios and tags in it, <b>Start Build</b>, review the proposed config per device, then <b>Submit</b>, which creates a change control.</li>
+          <li><b>Tags</b> are key:value labels on devices or interfaces (<code>DC:DC1</code>, <code>Role:Leaf</code>). Studios use tag queries to select what they apply to. System tags are automatic; user tags you create.</li>
+          <li>The <b>Inventory and Topology</b> studio decides which devices Studios manage. Start there.</li>
+          <li>The <b>Static Configuration</b> studio holds plain configlets in the Studios world, assigned by tag or device.</li>
+          <li>Other operational studios: Date and Time, Authentication, Software Management (images), Interface Configuration.</li>
+          <li>Day-2 change = open a workspace, change one input, build, review the diff, submit, approve the change control.</li>
+        </ul></div>
+        <div class="part"><h4>Workflow</h4>
+<pre>1  Workspaces &gt; New workspace "add-ntp"
+2  Studios &gt; Date and Time
+3  Apply to tag query:  Role:Leaf OR Role:Spine
+4  NTP server 192.168.0.1, VRF MGMT
+5  Start Build  -&gt; check proposed config
+6  Submit       -&gt; change control created
+7  Change Control: Review &amp; Approve, Execute
+
+<span class="c"># Tag queries</span>
+DC:DC1 AND Role:Leaf
+Role:Leaf AND NOT device:leaf4</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li>Build status green for every device; no "Configuration Validation" errors.</li>
+          <li>Change control complete; devices compliant.</li>
+          <li><code>show running-config | section ntp</code> on a leaf.</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Editing a studio but never submitting the workspace. Nothing reaches the devices.</li>
+          <li>Device not added to Inventory and Topology studio, so other studios ignore it.</li>
+          <li>Mixing classic configlets and Studios on one device without knowing which wins. Studio config and static configlets merge; conflicting lines fail validation.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><a class="chip" href="https://www.arista.com/en/cg-cv/cv-studios" target="_blank" rel="noopener"><b>CV</b>Studios guide</a><a class="chip lab" data-lab="obj-2-3" href="#"><b>LAB</b>D2</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D2</h3>
+    <details class="q"><summary>A colleague added a banner on leaf2 via CLI. You must push a new configlet from CloudVision without losing it. What first?</summary><div class="a"><p>Reconcile leaf2. CloudVision builds a reconcile configlet with the banner line so the designed config includes it. Then add your configlet and push through a change control.</p></div></details>
+    <details class="q"><summary>Ten new leaves arrive factory-fresh. How do they get to the right config with no console work?</summary><div class="a"><p>ZTP: DHCP hands each switch a bootfile URL on CVP, they register into the Undefined container, you move each to its container (inheriting configlets), add device configlets or a builder, assign the image bundle, and execute the change control.</p></div></details>
+    <details class="q"><summary>What does Submit in a Studios workspace actually do?</summary><div class="a"><p>It merges the workspace into mainline and creates a change control with one task per affected device. Nothing is pushed until that change control is approved and executed (unless auto-approve is configured).</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D3 ============ -->
+<section class="block" id="d3">
+  <div class="dom-head"><span class="num">D3</span><div><p class="exam">Operations exam · AN-DC-OP01</p><h2>Monitoring and Troubleshooting</h2></div>
+  <p class="intro">EOS can watch itself and act (scheduler, event monitor, event manager), stream to CloudVision, and give you packet-level tools without a probe. Expect tasks like "capture X when Y happens" and "find why host Z can't reach W".</p></div>
+
+  <article class="obj" id="obj-3-1" data-dom="3">
+    <header><span class="oid">3.1</span><h3>Advanced Event Management</h3><label class="conf"><input type="checkbox" id="c-3-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><b>Scheduler</b> runs a CLI command on an interval and keeps rotating log files in flash. The built-in <code>tech-support</code> schedule runs hourly.</li>
+          <li><b>Event monitor</b> records MAC, ARP, route, LACP, MRoute and other table changes into a local SQLite database you can query later.</li>
+          <li><b>Event manager</b> (<code>event-handler</code>) runs a bash or CLI action on a trigger: interface state, a log message, a counter threshold, boot, startup-config change, maintenance.</li>
+          <li>Actions can call <code>FastCli</code>, send email (ch. 22), or write to flash.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre><span class="k">schedule</span> cfg-backup interval 60 max-log-files 24 command show running-config
+
+<span class="k">event-monitor</span>          <span class="c">! on by default; buffers MAC/ARP/route</span>
+show event-monitor mac match-mac 0050.5600.0001
+show event-monitor route match-ip 10.10.10.0/24
+
+<span class="k">event-handler</span> UPLINK-DOWN
+   trigger on-intf Ethernet1 operstatus
+   delay 5
+   action bash FastCli -p15 -c "show interfaces Ethernet1" &gt; /mnt/flash/e1-down.txt
+
+<span class="k">event-handler</span> CRC
+   trigger on-counters
+      poll interval 10
+      condition Ethernet1.statistics.inErrors &gt; 100
+   action bash logger -p local4.warning "CRC on Et1"</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show schedule summary</code> · <code>dir flash:schedule/cfg-backup</code></li>
+          <li><code>show event-handler</code> (last trigger time, action status)</li>
+          <li><code>show event-monitor</code> sub-commands; <code>event-monitor interact</code> for SQL</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>No <code>delay</code>: a flapping link fires the handler repeatedly.</li>
+          <li>Bash quoting inside <code>action bash</code>. Test the command in <code>bash</code> first.</li>
+          <li>Scheduler interval is in minutes.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="24"></span><span data-ch="27"></span><span data-ch="28"></span><span data-ch="22"></span><a class="chip lab" data-lab="obj-3-1" href="#"><b>LAB</b>D3</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-3-2" data-dom="3">
+    <header><span class="oid">3.2</span><h3>Monitoring with CloudVision</h3><label class="conf"><input type="checkbox" id="c-3-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><b>Dashboards</b>: build from widgets (interface counters, device health, compliance counts, syslog filters). Export and import as JSON.</li>
+          <li><b>Events</b>: CloudVision raises events from streamed state (interface down, high CPU, BGP peer down, config sanity). Group them, acknowledge them, tune thresholds in event rules.</li>
+          <li><b>Compliance</b>: config compliance (designed vs running), image compliance, and bug exposure against Arista's bug database.</li>
+          <li><b>Endpoint search</b>: find a MAC or IP and see the switch and port it lives on, with history.</li>
+          <li><b>Topology</b>: auto-built from LLDP. Custom hierarchies and filters group devices by tag.</li>
+          <li>Because state is streamed with history, you can scrub the timeline back to before a fault ("time machine").</li>
+        </ul></div>
+        <div class="part"><h4>Where to look</h4>
+<pre>Dashboards  &gt; New dashboard &gt; add widgets
+Events      &gt; filter by severity / device
+Settings    &gt; Events &gt; event rules (thresholds)
+Devices     &gt; Inventory &gt; compliance column
+Devices     &gt; leaf1 &gt; Interfaces / BGP / Logs
+Search bar  &gt; 0050.5600.0001  (endpoint)
+Topology    &gt; Settings &gt; custom hierarchy by tag</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li>Dashboard shows live data for the devices selected by its filter.</li>
+          <li>A test event (shut an interface) appears, then clears.</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Device not streaming (TerminAttr down) means no telemetry, even if provisioning works.</li>
+          <li>Topology looks wrong when LLDP is disabled on a link.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><span data-ch="11"></span><a class="chip lab" data-lab="obj-3-2" href="#"><b>LAB</b>D3</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-3-3" data-dom="3">
+    <header><span class="oid">3.3</span><h3>EOS monitoring tools</h3><label class="conf"><input type="checkbox" id="c-3-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><b>SNMP</b>: prefer v3 with auth and privacy. Bind to the MGMT VRF.</li>
+          <li><b>sFlow</b>: sampled packet headers plus counters to a collector. Good for top talkers.</li>
+          <li><b>LANZ</b>: microsecond queue-depth reporting. Shows microbursts that average counters hide.</li>
+          <li><b>Port mirroring</b>: local SPAN, remote via GRE, or to the CPU so you can run tcpdump on the switch.</li>
+          <li><b>TAP aggregation</b>: turns a switch into a packet broker. Tap ports in, tool ports out, with filters.</li>
+          <li><code>watch</code> re-runs a command every N seconds; useful on counters.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre>snmp-server vrf MGMT
+snmp-server group RO v3 priv
+snmp-server user mon RO v3 auth sha AuthPass priv aes PrivPass
+
+sflow sample 16384
+sflow destination 192.168.0.20
+sflow source-interface Management1
+sflow run
+
+queue-monitor length
+show queue-monitor length
+
+monitor session CAP source Ethernet5 both
+monitor session CAP destination Cpu
+bash sudo tcpdump -i mirror0 -nn -c 50
+
+tcpdump interface Ethernet1 filter icmp   <span class="c">! CPU-bound only</span>
+watch 2 show interfaces Ethernet1 counters rates</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show sflow</code> · <code>show snmp user</code></li>
+          <li><code>show monitor session</code></li>
+          <li><code>show queue-monitor length</code> · <code>show tap aggregation groups</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>tcpdump on a front-panel interface only sees traffic to or from the CPU. Mirror to Cpu to see transit traffic.</li>
+          <li>sFlow source in the wrong VRF; datagrams never reach the collector.</li>
+          <li>TAP aggregation <code>mode exclusive</code> turns all switching off on that switch.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="23"></span><span data-ch="25"></span><span data-ch="26"></span><span data-ch="3"></span><a class="chip lab" data-lab="obj-3-3" href="#"><b>LAB</b>D3</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-3-4" data-dom="3">
+    <header><span class="oid">3.4</span><h3>Troubleshooting system, physical and hardware</h3><label class="conf"><input type="checkbox" id="c-3-4"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Work bottom-up: physical (optics, light levels, errors), L2 (LLDP, STP, LACP, MLAG), L3 (routing, ARP), overlay (VXLAN, EVPN). See <a href="#tshoot">R2</a>.</li>
+          <li>Optics: DOM readings for Rx/Tx power. Low Rx with CRC errors usually means a dirty fiber or bad optic.</li>
+          <li>Software: crashed agents leave logs; <code>show agent logs crash</code>. CPU spikes: <code>show processes top once</code>.</li>
+          <li>Hardware tables: <code>show hardware capacity</code> for TCAM and route/MAC limits.</li>
+          <li><code>show tech-support</code> is what TAC wants; the scheduler keeps hourly copies.</li>
+        </ul></div>
+        <div class="part"><h4>Commands</h4>
+<pre>show interfaces status errdisabled
+show interfaces counters errors
+show interfaces Ethernet1 transceiver
+show interfaces Ethernet1 phy detail
+show lldp neighbors
+show logging last 30 minutes
+show agent logs crash
+show processes top once
+show hardware capacity
+show system environment all
+show version | include memory|uptime</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li>Counters stop incrementing after the fix: <code>clear counters</code>, wait, re-check.</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>An errdisabled port (BPDU guard, link-flap) needs <code>shutdown</code> / <code>no shutdown</code> or errdisable recovery after the cause is fixed.</li>
+          <li>Speed/FEC mismatch on 25G/100G links leaves the link down with both sides "notconnect".</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="29"></span><span data-ch="11"></span><a class="chip lab" data-lab="obj-3-4" href="#"><b>LAB</b>D3</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D3</h3>
+    <details class="q"><summary>Save the output of "show ip bgp summary" every 15 minutes, keeping one day of files.</summary><div class="a"><pre>schedule bgp-sum interval 15 max-log-files 96 command show ip bgp summary</pre></div></details>
+    <details class="q"><summary>A host says it moved last night. How do you prove when and where its MAC moved?</summary><div class="a"><p><code>show event-monitor mac match-mac &lt;mac&gt;</code> on the switch, or endpoint search in CloudVision, which keeps location history.</p></div></details>
+    <details class="q"><summary>You run tcpdump on Ethernet5 and see none of the host's traffic to another host. Why?</summary><div class="a"><p>EOS tcpdump on an interface only shows CPU-bound frames. Transit traffic is switched in hardware. Mirror the port to <code>Cpu</code> and capture on <code>mirror0</code>.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D4 ============ -->
+<section class="block" id="d4">
+  <div class="dom-head"><span class="num">D4</span><div><p class="exam">Engineering exam · AN-DC-EN01</p><h2>Layer 2 and Layer 3 Designs</h2></div>
+  <p class="intro">Two fabric shapes. L2LS keeps the spines as a Layer 2/3 boundary with MLAG, so STP sees no loops. L3LS routes every leaf-to-spine link, uses ECMP, and carries Layer 2 over VXLAN where it's needed.</p></div>
+
+  <article class="obj" id="obj-4-1" data-dom="4">
+    <header><span class="oid">4.1</span><h3>L2LS: VLANs, STP, LACP, MLAG, VARP/VRRP</h3><label class="conf"><input type="checkbox" id="c-4-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>EOS default STP is MSTP. Keep the spines (MLAG pair) as root; edge ports get portfast and BPDU guard.</li>
+          <li>MLAG makes two switches look like one LACP partner. The peer link carries control (VLAN 4094) and any traffic that must cross. Dual-primary detection uses a heartbeat over management.</li>
+          <li><code>reload-delay</code> keeps MLAG ports down after a reboot until the peer link and tables are synced. Non-MLAG ports wait a bit longer.</li>
+          <li>VARP: both MLAG peers answer for the same virtual IP and MAC, and both route. VRRP: one master, one backup.</li>
+          <li>Routed subinterfaces (<code>Ethernet1.100</code>) give one VLAN-tagged L3 link per VRF on a routed port.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf1)</h4>
+<pre>spanning-tree mode mstp
+no spanning-tree vlan-id 4094
+vlan 4094
+   trunk group MLAGPEER
+interface Port-Channel1000
+   switchport mode trunk
+   switchport trunk group MLAGPEER
+interface Ethernet47-48
+   channel-group 1000 mode active
+interface Vlan4094
+   no autostate
+   ip address 10.255.252.0/31
+<span class="k">mlag configuration</span>
+   domain-id PAIR1
+   local-interface Vlan4094
+   peer-address 10.255.252.1
+   peer-address heartbeat 192.168.0.12 vrf MGMT
+   peer-link Port-Channel1000
+   dual-primary detection delay 5 action errdisable all-interfaces
+   reload-delay mlag 300
+   reload-delay non-mlag 330
+interface Port-Channel10       <span class="c">! to host1</span>
+   switchport access vlan 10
+   <span class="k">mlag 10</span>
+   spanning-tree portfast
+   spanning-tree bpduguard enable
+interface Ethernet10
+   channel-group 10 mode active
+ip virtual-router mac-address 00:1c:73:00:00:99
+interface Vlan10
+   ip address 10.10.10.2/24
+   ip virtual-router address 10.10.10.1</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show mlag</code> · <code>show mlag config-sanity</code> · <code>show mlag interfaces</code></li>
+          <li><code>show port-channel summary</code> · <code>show lacp neighbor</code></li>
+          <li><code>show spanning-tree</code> · <code>show spanning-tree root</code> · <code>show spanning-tree blockedports</code></li>
+          <li><code>show ip virtual-router</code> · <code>show vrrp brief</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>MLAG config-sanity mismatches (VLANs, trunk lists, STP mode) between peers.</li>
+          <li>Same <code>mlag</code> ID on both peers is required; different port-channel numbers are allowed but confusing.</li>
+          <li>STP running on VLAN 4094 can block the peer link.</li>
+          <li>VARP needs a real (unique) IP on each SVI plus the shared virtual IP.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="17"></span><span data-ch="18"></span><span data-ch="19"></span><span data-ch="11"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/l2ls-fabric/index.html" target="_blank" rel="noopener"><b>AVD</b>L2LS example</a><a class="chip lab" data-lab="obj-4-1" href="#"><b>LAB</b>D4</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-4-2" data-dom="4">
+    <header><span class="oid">4.2</span><h3>L3LS architecture and underlay choices</h3><label class="conf"><input type="checkbox" id="c-4-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Every leaf connects to every spine with a routed /31. No STP in the fabric; all uplinks forward through ECMP.</li>
+          <li>The underlay only needs to carry loopbacks (router IDs and VTEP addresses). Tenant routes live in the overlay.</li>
+          <li>Underlay options: <b>eBGP</b> (one protocol everywhere, clear failure domains, RFC 7938), <b>OSPF</b> or <b>IS-IS</b> (simple, then iBGP or eBGP for the overlay).</li>
+          <li>Common ASN plan: all spines share one ASN; each leaf (or MLAG pair) gets its own. Spines never peer with each other.</li>
+          <li>VXLAN gives Layer 2 across the routed fabric. EVPN is the control plane that tells VTEPs about MACs, IPs and floods.</li>
+          <li>Scale out by adding spines (bandwidth) or leaves (ports). A 5-stage design adds super-spines for multiple pods.</li>
+        </ul></div>
+        <div class="part"><h4>Design table</h4>
+<div class="tbl"><table><thead><tr><th></th><th>L2LS</th><th>L3LS</th></tr></thead><tbody>
+<tr><td>Spine role</td><td>L2/L3 gateway, MLAG pair</td><td>Routed transit only</td></tr>
+<tr><td>Loop control</td><td>MLAG + STP</td><td>Routing, ECMP</td></tr>
+<tr><td>Spine count</td><td>2</td><td>2 to many</td></tr>
+<tr><td>Gateway</td><td>Spines (VARP)</td><td>Leaves (anycast)</td></tr>
+<tr><td>Stretch L2</td><td>Native VLANs</td><td>VXLAN/EVPN</td></tr>
+<tr><td>Failure domain</td><td>Whole L2 domain</td><td>One leaf / pair</td></tr>
+</tbody></table></div></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="2"></span><span data-ch="5"></span><span data-ch="4"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/roles/eos_designs/index.html#layer-3-leaf-spine-with-vxlan-evpn" target="_blank" rel="noopener"><b>AVD</b>L3LS design</a><a class="chip" href="https://www.rfc-editor.org/rfc/rfc7938" target="_blank" rel="noopener"><b>RFC</b>7938</a><a class="chip lab" data-lab="obj-4-2" href="#"><b>LAB</b>D4</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-4-3" data-dom="4">
+    <header><span class="oid">4.3</span><h3>Design best practice: MTU, BGP design, validation</h3><label class="conf"><input type="checkbox" id="c-4-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>VXLAN adds 50 bytes (outer Ethernet 14 + IP 20 + UDP 8 + VXLAN 8). Set fabric links to 9214 so 9000-byte host frames still fit.</li>
+          <li>MLAG peer link and the iBGP SVI need jumbo MTU too.</li>
+          <li>eBGP in the underlay and overlay is the common Arista design. iBGP overlay with route reflectors on the spines is the alternative.</li>
+          <li>If leaves reuse ASNs across racks, they need <code>allowas-in</code>. Unique ASNs avoid that.</li>
+          <li>Validation habit: after every change, check neighbors, routes, and a ping with a large, unfragmentable packet.</li>
+        </ul></div>
+        <div class="part"><h4>Configure / test</h4>
+<pre>interface Ethernet1
+   description P2P_spine1_Ethernet1
+   mtu 9214
+   no switchport
+   ip address 10.255.255.1/31
+
+<span class="c">! test the path MTU through the overlay</span>
+ping vrf TENANT-A 10.20.20.11 source 10.10.10.1
+     size 8972 df-bit
+show interfaces Ethernet1 | include MTU</pre></div>
+      </div>
+      <div class="part traps"><h4>Exam traps</h4><ul>
+        <li>MTU 1500 on one fabric link: small pings work, large transfers hang. Test with <code>df-bit</code>.</li>
+        <li>OSPF neighbors stuck in EXSTART/EXCHANGE: MTU mismatch.</li>
+      </ul></div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="2"></span><span data-ch="21"></span><a class="chip lab" data-lab="obj-4-3" href="#"><b>LAB</b>D4</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D4</h3>
+    <details class="q"><summary>show mlag says "inconsistent". Where do you look first?</summary><div class="a"><p><code>show mlag config-sanity</code>. It lists the global and per-interface settings that differ between peers (VLAN lists, STP, port-channel options).</p></div></details>
+    <details class="q"><summary>A 9000-byte ping between hosts on different leaves fails; 1400 works. What's the likely cause?</summary><div class="a"><p>An underlay link with MTU below 9050. VXLAN adds 50 bytes. Set fabric links to 9214 and re-test with <code>size 8972 df-bit</code>.</p></div></details>
+    <details class="q"><summary>Why do spines in an eBGP L3LS usually share one ASN?</summary><div class="a"><p>A route learned from one spine can't be re-advertised by a leaf to another spine and accepted (same ASN in the path), which stops leaf-to-spine-to-leaf-to-spine path hunting, and the config stays uniform.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D5 ============ -->
+<section class="block" id="d5">
+  <div class="dom-head"><span class="num">D5</span><div><p class="exam">Engineering exam · AN-DC-EN01</p><h2>Underlay Protocols</h2></div>
+  <p class="intro">The underlay's job is simple: every loopback reachable from every switch, over all equal paths, with fast failure detection. Most exam tasks here are BGP.</p></div>
+
+  <article class="obj" id="obj-5-1" data-dom="5">
+    <header><span class="oid">5.1</span><h3>eBGP underlay</h3><label class="conf"><input type="checkbox" id="c-5-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Peer on the point-to-point /31s. Advertise Loopback0 and Loopback1 only, through a route map on <code>redistribute connected</code> or with <code>network</code> statements.</li>
+          <li><code>service routing protocols model multi-agent</code> is required for EVPN and is the default on recent EOS. On older EOS it needs a reload.</li>
+          <li>Peer groups keep config short. <code>no bgp default ipv4-unicast</code> stops sessions activating address families you didn't ask for.</li>
+          <li>Spines can use <code>bgp listen range</code> with a <code>peer-filter</code> so new leaves peer without spine changes.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf1)</h4>
+<pre>service routing protocols model multi-agent
+ip prefix-list PL-LOOPBACKS
+   seq 10 permit 10.255.0.0/24 eq 32
+   seq 20 permit 10.255.1.0/24 eq 32
+route-map RM-CONN-2-BGP permit 10
+   match ip address prefix-list PL-LOOPBACKS
+<span class="k">router bgp 65101</span>
+   router-id 10.255.0.3
+   no bgp default ipv4-unicast
+   maximum-paths 4 ecmp 4
+   neighbor UNDERLAY peer group
+   neighbor UNDERLAY remote-as 65100
+   neighbor UNDERLAY send-community
+   neighbor UNDERLAY maximum-routes 12000
+   neighbor 10.255.255.0 peer group UNDERLAY
+   neighbor 10.255.255.2 peer group UNDERLAY
+   redistribute connected route-map RM-CONN-2-BGP
+   address-family ipv4
+      neighbor UNDERLAY activate
+
+<span class="c">! spine1: dynamic peers</span>
+peer-filter LEAF-ASNS
+   10 match as-range 65101-65199 result accept
+router bgp 65100
+   bgp listen range 10.255.255.0/24 peer-group UNDERLAY peer-filter LEAF-ASNS</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show ip bgp summary</code> (Estab, PfxRcd)</li>
+          <li><code>show ip route bgp</code> · <code>show ip bgp 10.255.0.5/32</code></li>
+          <li><code>ping 10.255.0.5 source Loopback0</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Forgetting <code>activate</code> under <code>address-family ipv4</code> when the default is off: session up, no routes.</li>
+          <li>Prefix list <code>eq 32</code> missing, so connected /31s leak into the fabric.</li>
+          <li>Wrong <code>remote-as</code>: session sits in Active / OpenSent with a notification in the log.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="2"></span><span data-ch="20"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/single-dc-l3ls/index.html" target="_blank" rel="noopener"><b>AVD</b>Single DC L3LS</a><a class="chip lab" data-lab="obj-5-1" href="#"><b>LAB</b>D5</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-5-2" data-dom="5">
+    <header><span class="oid">5.2</span><h3>Load balancing and enhancements</h3><label class="conf"><input type="checkbox" id="c-5-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><code>maximum-paths N ecmp N</code>: N installed paths, hardware ECMP group size N. Default is 1 path.</li>
+          <li>ECMP hashes on the 5-tuple. VXLAN encap puts a hash of the inner flow in the outer UDP source port, so overlay flows spread too.</li>
+          <li>BFD gives sub-second failure detection. BGP hold timers (default 180 s) are far too slow on their own.</li>
+          <li>Route maps and prefix lists control what is advertised; <code>maximum-routes</code> protects the control plane.</li>
+          <li>Different AS paths of the same length need <code>bgp bestpath as-path multipath-relax</code> to be multipathed. With one spine ASN you rarely need it.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre>router bgp 65101
+   maximum-paths 4 ecmp 4
+   neighbor UNDERLAY bfd
+   timers bgp 3 9         <span class="c">! optional, BFD is the real fix</span>
+bfd
+   interval 300 min-rx 300 multiplier 3
+
+ip load-sharing trident fields ip source-ip destination-ip
+   source-port destination-port   <span class="c">! platform-specific</span></pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show ip route 10.255.0.5</code> (two next hops)</li>
+          <li><code>show bfd peers</code></li>
+          <li><code>show ip bgp neighbors 10.255.255.0 | include BFD</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Only one path installed because <code>maximum-paths</code> was not set.</li>
+          <li>BFD enabled on one side only: the session never comes up, BGP doesn't care.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="2"></span><span data-ch="5"></span><a class="chip lab" data-lab="obj-5-2" href="#"><b>LAB</b>D5</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-5-3" data-dom="5">
+    <header><span class="oid">5.3</span><h3>BGP with MLAG</h3><label class="conf"><input type="checkbox" id="c-5-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>An MLAG pair shares an ASN and runs iBGP between the peers over a dedicated SVI (VLAN 4093) on the peer link.</li>
+          <li>Why: if leaf1 loses both uplinks, it still reaches the fabric through leaf2, so hosts single-attached to leaf1 keep working.</li>
+          <li><code>next-hop-self</code> on the iBGP session, because leaf2's eBGP next hops aren't reachable from leaf1 directly.</li>
+          <li>For EVPN with symmetric IRB, each VRF also needs an iBGP peering across the pair (a VLAN per VRF), so a leaf that lost uplinks can still route that VRF.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf1)</h4>
+<pre>vlan 4093
+   trunk group MLAGPEER
+no spanning-tree vlan-id 4093
+interface Vlan4093
+   mtu 9214
+   ip address 10.255.252.2/31
+router bgp 65101
+   neighbor MLAG-IPV4 peer group
+   neighbor MLAG-IPV4 remote-as 65101
+   neighbor MLAG-IPV4 next-hop-self
+   neighbor MLAG-IPV4 send-community
+   neighbor 10.255.252.3 peer group MLAG-IPV4
+   address-family ipv4
+      neighbor MLAG-IPV4 activate</pre></div>
+      </div>
+      <div class="part traps"><h4>Exam traps</h4><ul>
+        <li>No <code>next-hop-self</code>: routes from the peer show as inactive (next hop unreachable).</li>
+        <li>VLAN 4093 not in the peer-link trunk group.</li>
+      </ul></div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="18"></span><span data-ch="2"></span><a class="chip lab" data-lab="obj-5-3" href="#"><b>LAB</b>D5</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-5-4" data-dom="5">
+    <header><span class="oid">5.4</span><h3>IGP underlay: OSPF and IS-IS</h3><label class="conf"><input type="checkbox" id="c-5-4"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Single area (OSPF area 0, IS-IS level-2) is enough for a pod.</li>
+          <li>Point-to-point network type on fabric links: no DR/BDR election, faster adjacency.</li>
+          <li>Passive by default; enable only on fabric links. Advertise loopbacks as passive interfaces.</li>
+          <li>With an IGP underlay, the overlay is usually iBGP EVPN with the spines as route reflectors.</li>
+        </ul></div>
+        <div class="part"><h4>Configure</h4>
+<pre><span class="k">router ospf</span> 100
+   router-id 10.255.0.3
+   passive-interface default
+   no passive-interface Ethernet1
+   no passive-interface Ethernet2
+   max-lsa 12000
+   maximum-paths 4
+interface Ethernet1
+   ip ospf network point-to-point
+   ip ospf area 0.0.0.0
+interface Loopback0
+   ip ospf area 0.0.0.0
+
+<span class="k">router isis</span> UNDERLAY
+   net 49.0001.0102.5500.0003.00
+   is-type level-2
+   address-family ipv4 unicast
+      maximum-paths 4
+interface Ethernet1
+   isis enable UNDERLAY
+   isis network point-to-point
+interface Loopback0
+   isis enable UNDERLAY
+   isis passive</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show ip ospf neighbor</code> · <code>show ip ospf database</code></li>
+          <li><code>show isis neighbors</code> · <code>show isis database detail</code></li>
+          <li><code>show ip route ospf</code> / <code>show ip route isis</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Mismatched network type (broadcast vs point-to-point) or MTU blocks adjacency.</li>
+          <li>IS-IS NET with a duplicate system ID.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="2"></span><a class="chip lab" data-lab="obj-5-4" href="#"><b>LAB</b>D5</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D5</h3>
+    <details class="q"><summary>BGP sessions are Established but leaf1 has no route to leaf3's loopback. List three causes.</summary><div class="a"><ul><li>Address family not activated (<code>no bgp default ipv4-unicast</code> without <code>activate</code>).</li><li>leaf3's route map or prefix list doesn't match its loopback, so it's never advertised.</li><li>Inbound filter or <code>maximum-routes</code> exceeded on a spine.</li></ul></div></details>
+    <details class="q"><summary>Only one of two spine paths is in the RIB. Fix it.</summary><div class="a"><pre>router bgp 65101
+   maximum-paths 4 ecmp 4</pre></div></details>
+    <details class="q"><summary>leaf1 loses both uplinks. host1 is single-attached to leaf1. What keeps host1 reachable?</summary><div class="a"><p>The iBGP session to leaf2 over VLAN 4093 (with next-hop-self). leaf1 learns fabric routes via leaf2 and forwards over the peer link.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D6 ============ -->
+<section class="block" id="d6">
+  <div class="dom-head"><span class="num">D6</span><div><p class="exam">Engineering exam · AN-DC-EN01</p><h2>Overlay Protocols</h2></div>
+  <p class="intro">The center of the Engineering exam. VXLAN is the data plane: a 24-bit VNI in a UDP header, between VTEP loopbacks. EVPN is the control plane: BGP routes that tell VTEPs which MACs and IPs sit behind which VTEP, and who wants floods. Read <a href="#walk">R1</a> after this domain.</p></div>
+
+  <article class="obj" id="obj-6-1" data-dom="6">
+    <header><span class="oid">6.1</span><h3>VXLAN: VTEPs, VNIs, HER, VXLAN with MLAG</h3><label class="conf"><input type="checkbox" id="c-6-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>VTEP = the <code>Vxlan1</code> interface, sourced from a loopback. UDP port 4789.</li>
+          <li>L2 VNI maps a VLAN to a VNI (bridging). L3 VNI maps a VRF to a VNI (routing between VTEPs in symmetric IRB).</li>
+          <li>BUM (broadcast, unknown unicast, multicast) handling: <b>HER</b> sends a copy to each VTEP in a static flood list. Other options: multicast underlay, CVX (VCS), or EVPN type-3 routes (dynamic HER).</li>
+          <li>MLAG pair = one logical VTEP. Both peers use the same Loopback1 IP; Loopback0 stays unique.</li>
+          <li>Data-plane learning: without EVPN, VTEPs learn remote MACs from received frames.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf1, static HER)</h4>
+<pre>interface Loopback1
+   description VTEP
+   ip address 10.255.1.3/32        <span class="c">! same on leaf2</span>
+<span class="k">interface Vxlan1</span>
+   vxlan source-interface Loopback1
+   vxlan udp-port 4789
+   vxlan vlan 10 vni 10010
+   vxlan vlan 20 vni 10020
+   vxlan vlan 30 vni 10030
+   vxlan flood vtep 10.255.1.5      <span class="c">! remote pair</span></pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show interfaces Vxlan1</code> · <code>show vxlan config-sanity detail</code></li>
+          <li><code>show vxlan vtep</code> · <code>show vxlan flood vtep</code></li>
+          <li><code>show vxlan address-table</code> (remote MACs and their VTEP)</li>
+          <li><code>show vxlan vni</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Loopback1 not advertised into the underlay: tunnels never form.</li>
+          <li>VLAN→VNI mapping differs between VTEPs (10→10010 here, 10→1010 there).</li>
+          <li>MLAG peers with different Loopback1 addresses; remote VTEPs see two VTEPs and MACs flap.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="21"></span><span data-ch="18"></span><a class="chip lab" data-lab="obj-6-1" href="#"><b>LAB</b>D6</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-6-2" data-dom="6">
+    <header><span class="oid">6.2</span><h3>EVPN overlay: route types, VRFs, IRB</h3><label class="conf"><input type="checkbox" id="c-6-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Overlay sessions run between Loopback0 addresses (eBGP multihop to the spines, or iBGP to route reflectors), address family <code>evpn</code>, with extended communities.</li>
+          <li>Spines in an eBGP overlay keep the original next hop: <code>next-hop-unchanged</code>. Otherwise traffic tunnels to the spine.</li>
+          <li><b>Type 2</b> MAC/IP: a host's MAC (and IP) behind a VTEP. <b>Type 3</b> IMET: "send me floods for this VNI", builds the flood list. <b>Type 5</b> IP prefix: subnets and external routes in a VRF.</li>
+          <li>RD makes a route unique; RT decides which MAC-VRF or IP-VRF imports it. AVD convention: RD = router-id:VNI, RT = VNI:VNI.</li>
+          <li><b>VLAN-based</b> service: one EVI per VLAN. <b>VLAN-aware bundle</b>: one EVI with many VLANs, one RD/RT, Ethernet tag = VLAN.</li>
+          <li><b>Symmetric IRB</b>: route at ingress and egress through the L3 VNI. Leaves only need the VLANs they host. Scales well. <b>Asymmetric IRB</b>: ingress routes and bridges into the destination VNI. Every leaf needs every VLAN; no L3 VNI.</li>
+          <li>Anycast gateway: <code>ip address virtual</code> with the same IP and virtual MAC on every leaf.</li>
+          <li>L2-only VLAN (30 here): VLAN plus VNI plus MAC-VRF, no SVI, nothing in the VRF.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf1, symmetric IRB)</h4>
+<pre>vrf instance TENANT-A
+ip routing vrf TENANT-A
+ip virtual-router mac-address 00:1c:73:00:00:99
+interface Vlan10
+   vrf TENANT-A
+   ip address virtual 10.10.10.1/24
+interface Vxlan1
+   vxlan virtual-router encapsulation mac-address mlag-system-id
+   vxlan vrf TENANT-A vni 50001
+<span class="k">router bgp 65101</span>
+   neighbor EVPN-OVERLAY peer group
+   neighbor EVPN-OVERLAY remote-as 65100
+   neighbor EVPN-OVERLAY update-source Loopback0
+   neighbor EVPN-OVERLAY ebgp-multihop 3
+   neighbor EVPN-OVERLAY send-community
+   neighbor 10.255.0.1 peer group EVPN-OVERLAY
+   neighbor 10.255.0.2 peer group EVPN-OVERLAY
+   <span class="k">vlan 10</span>
+      rd 10.255.0.3:10010
+      route-target both 10010:10010
+      redistribute learned
+   <span class="k">vrf TENANT-A</span>
+      rd 10.255.0.3:50001
+      route-target import evpn 50001:50001
+      route-target export evpn 50001:50001
+      redistribute connected
+   address-family evpn
+      neighbor EVPN-OVERLAY activate
+
+<span class="c">! spines</span>
+router bgp 65100
+   neighbor EVPN-OVERLAY next-hop-unchanged
+
+<span class="c">! VLAN-aware bundle alternative</span>
+   vlan-aware-bundle TENANT-A
+      rd 10.255.0.3:1
+      route-target both 1:1
+      redistribute learned
+      vlan 10,20,30</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show bgp evpn summary</code></li>
+          <li><code>show bgp evpn route-type imet</code> (one per remote VTEP per VNI)</li>
+          <li><code>show bgp evpn route-type mac-ip 10.10.10.11 detail</code></li>
+          <li><code>show bgp evpn route-type ip-prefix ipv4</code></li>
+          <li><code>show ip route vrf TENANT-A</code> · <code>show vxlan address-table</code></li>
+          <li><code>show bgp evpn instance</code></li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Missing <code>send-community</code> (extended): routes arrive with no RTs and aren't imported.</li>
+          <li>Missing <code>next-hop-unchanged</code> on eBGP spines.</li>
+          <li>No <code>redistribute learned</code> under the MAC-VRF: local MACs never become type-2 routes.</li>
+          <li>RT import/export mismatch between leaves. Compare <code>show bgp evpn ... detail</code> communities.</li>
+          <li>Missing the L3 VNI or the virtual-router MAC: same-subnet works, routed traffic fails.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="21"></span><span data-ch="19"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/single-dc-l3ls/index.html" target="_blank" rel="noopener"><b>AVD</b>Single DC L3LS</a><a class="chip" href="https://www.rfc-editor.org/rfc/rfc7432" target="_blank" rel="noopener"><b>RFC</b>7432</a><a class="chip" href="https://www.rfc-editor.org/rfc/rfc9135" target="_blank" rel="noopener"><b>RFC</b>9135 IRB</a><a class="chip lab" data-lab="obj-6-2" href="#"><b>LAB</b>D6</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-6-3" data-dom="6">
+    <header><span class="oid">6.3</span><h3>EVPN multihoming (ESI, all-active)</h3><label class="conf"><input type="checkbox" id="c-6-3"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>The standards-based alternative to MLAG: two (or more) leaves share an Ethernet Segment, identified by a 10-byte ESI, with no peer link.</li>
+          <li><b>Type 1</b> Ethernet A-D: per-ES (fast mass withdraw when the segment fails) and per-EVI (aliasing, so remote VTEPs load-balance to all leaves on the segment).</li>
+          <li><b>Type 4</b> Ethernet Segment: discovers the peers on an ES and elects the designated forwarder (DF), which alone forwards BUM to the host.</li>
+          <li>Both leaves must present the same LACP system ID so the host bundles them into one LAG.</li>
+          <li>DF election defaults to modulus (by VLAN). Preference-based election lets you pick the DF.</li>
+        </ul></div>
+        <div class="part"><h4>Configure (leaf3 and leaf4, same values)</h4>
+<pre>interface Port-Channel5
+   switchport mode trunk
+   switchport trunk allowed vlan 10,20
+   <span class="k">evpn ethernet-segment</span>
+      identifier 0000:0000:0303:0202:0101
+      route-target import 03:03:02:02:01:01
+   <span class="k">lacp system-id</span> 0303.0202.0101
+interface Ethernet5
+   channel-group 5 mode active
+
+<span class="c">! optional: choose the DF</span>
+   evpn ethernet-segment
+      designated-forwarder election algorithm preference 200</pre></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Verify</h4><ul>
+          <li><code>show bgp evpn route-type ethernet-segment</code></li>
+          <li><code>show bgp evpn route-type auto-discovery</code></li>
+          <li><code>show bgp evpn instance</code> (DF per VLAN, local ES)</li>
+          <li><code>show port-channel summary</code> on the host side</li>
+        </ul></div>
+        <div class="part traps"><h4>Exam traps</h4><ul>
+          <li>Different ESI or LACP system ID on the two leaves: the host's LAG won't bundle, or BUM is duplicated.</li>
+          <li>Using ESI multihoming on ports that are also MLAG ports. Pick one per segment.</li>
+        </ul></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="21"></span><span data-ch="18"></span><a class="chip" href="https://www.rfc-editor.org/rfc/rfc7432" target="_blank" rel="noopener"><b>RFC</b>7432 §8</a><a class="chip lab" data-lab="obj-6-3" href="#"><b>LAB</b>D6</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D6</h3>
+    <details class="q"><summary>host1 (VLAN 10, leaf1) pings host2 (VLAN 10, leaf3) fine but can't ping 10.20.20.11 (VLAN 20, leaf3). What do you check?</summary><div class="a"><p>Bridging works, routing doesn't, so check the L3 parts: <code>vxlan vrf TENANT-A vni 50001</code> on both, the VRF RD/RTs in BGP, <code>ip virtual-router mac-address</code>, and <code>show ip route vrf TENANT-A</code> on leaf1 for a type-2 host route or type-5 subnet pointing at leaf3's VTEP.</p></div></details>
+    <details class="q"><summary>Which EVPN route type tells a VTEP to add another VTEP to its flood list?</summary><div class="a"><p>Type 3, Inclusive Multicast Ethernet Tag (IMET).</p></div></details>
+    <details class="q"><summary>Leaves receive EVPN routes but import none of them. The first thing to check?</summary><div class="a"><p>Route targets. Make sure extended communities are sent (<code>send-community</code> or <code>send-community extended</code>) on every hop, and that import RTs match export RTs.</p></div></details>
+    <details class="q"><summary>Symmetric or asymmetric IRB for 200 VLANs across 40 leaves where each rack uses 10 VLANs?</summary><div class="a"><p>Symmetric. Each leaf only configures its own 10 VLANs plus the L3 VNI. Asymmetric would need all 200 VLANs and SVIs on every leaf.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ D7 ============ -->
+<section class="block" id="d7">
+  <div class="dom-head"><span class="num">D7</span><div><p class="exam">Engineering exam · AN-DC-EN01</p><h2>Automation and Management</h2></div>
+  <p class="intro">Building the D4–D6 fabric with CloudVision instead of the CLI, then (for real-world depth) as code with AVD. The L3LS-EVPN Studio uses the AVD data model, so learning AVD's inputs teaches you the Studio's inputs too.</p></div>
+
+  <article class="obj" id="obj-7-1" data-dom="7">
+    <header><span class="oid">7.1</span><h3>Deploying L2LS, L3LS and EVPN with configlets</h3><label class="conf"><input type="checkbox" id="c-7-1"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Split config into layers and attach each at the right container: <b>global</b> (AAA, NTP, TerminAttr) at the top, <b>role</b> (spine or leaf BGP template, MLAG skeleton) at Spine/Leaf containers, <b>device</b> (hostname, IPs, ASN) per device.</li>
+          <li>A configlet builder can generate the device layer from a small form or a YAML/IPAM lookup.</li>
+          <li>Push in stages: underlay first, verify, then overlay. One change control per stage, with snapshots.</li>
+        </ul></div>
+        <div class="part"><h4>Example layout</h4>
+<pre>Tenant
+└─ DC1                 GLOBAL-BASE
+   ├─ Spines           SPINE-BGP
+   │  ├─ spine1        spine1-DEVICE
+   │  └─ spine2        spine2-DEVICE
+   └─ Leaves           LEAF-BGP, LEAF-VXLAN
+      ├─ Pair1         MLAG-PAIR1, TENANT-A-SVCS
+      │  ├─ leaf1      leaf1-DEVICE
+      │  └─ leaf2      leaf2-DEVICE
+      └─ Pair2         MLAG-PAIR2, TENANT-A-SVCS</pre></div>
+      </div>
+      <div class="part traps"><h4>Exam traps</h4><ul>
+        <li>Putting device-specific lines (router-id, IPs) in a container configlet: every device gets the same address.</li>
+        <li>Forgetting that configlet order matters when two set the same section.</li>
+      </ul></div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><span data-ch="9"></span><a class="chip lab" data-lab="obj-7-1" href="#"><b>LAB</b>D7</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-7-2" data-dom="7">
+    <header><span class="oid">7.2</span><h3>Studios for engineering: L3LS, EVPN services, interfaces</h3><label class="conf"><input type="checkbox" id="c-7-2"> I can do this</label></header>
+    <div class="body">
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li>Order: <b>Inventory and Topology</b> (devices in), tag devices (<code>DC</code>, <code>DC-Pod</code>, <code>Role</code>, <code>Leaf-Domain</code> for MLAG pairs), then the <b>L3 Leaf-Spine</b> fabric studio builds underlay, MLAG, and overlay peering from pools and ASN ranges.</li>
+          <li><b>EVPN Services</b> studio: tenants, VRFs (L3 VNI), VLANs (L2 VNI, SVI, anycast gateway), applied to leaves by tag.</li>
+          <li><b>Interface Configuration</b> studio: interface profiles (access, trunk, port-channel, MLAG or ESI) applied to interfaces by tag.</li>
+          <li>External connectivity: border leaves with routed uplinks or subinterfaces per VRF to an external router, peering BGP in the tenant VRF.</li>
+          <li>Each studio change is built and reviewed in a workspace, then submitted as a change control.</li>
+        </ul></div>
+        <div class="part"><h4>Inputs you'll fill</h4>
+<pre>L3 Leaf-Spine fabric
+  DC1 / Pod1
+    Spine ASN          65100
+    Leaf ASN range     65101-65199
+    Loopback0 pool     10.255.0.0/24
+    VTEP pool          10.255.1.0/24
+    P2P pool           10.255.255.0/24
+    MLAG peer pool     10.255.252.0/24
+    VXLAN overlay      eBGP EVPN
+EVPN Services
+  Tenant A
+    VRF TENANT-A       L3 VNI 50001
+    VLAN 10  VNI 10010  10.10.10.1/24
+    VLAN 20  VNI 10020  10.20.20.1/24
+    VLAN 30  VNI 10030  (L2 only)</pre></div>
+      </div>
+      <div class="part traps"><h4>Exam traps</h4><ul>
+        <li>Missing <code>Leaf-Domain</code> tag: two leaves aren't treated as an MLAG pair.</li>
+        <li>Build errors from overlapping pools or an ASN outside the range. Read the build log.</li>
+      </ul></div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><a class="chip" href="https://www.arista.com/en/cg-cv/cv-studios" target="_blank" rel="noopener"><b>CV</b>Studios guide</a><a class="chip lab" data-lab="obj-7-2" href="#"><b>LAB</b>D7</a></div>
+    </div>
+  </article>
+
+  <article class="obj" id="obj-7-3" data-dom="7">
+    <header><span class="oid">7.3</span><h3>AVD, ANTA and eAPI: the fabric as code</h3><label class="conf"><input type="checkbox" id="c-7-3"> I can do this</label></header>
+    <div class="body">
+      <p class="note">Not named on the exam datasheet. It's here because it's how the same fabric is built in production, and because older "ACE L5" meant the automation track.</p>
+      <div class="cols">
+        <div class="part"><h4>Know</h4><ul>
+          <li><b>AVD</b> is an Ansible collection (and the Python library PyAVD). <code>eos_designs</code> turns a few YAML files describing the fabric into per-device structured config; <code>eos_cli_config_gen</code> renders EOS config and docs from that; <code>cv_deploy</code> pushes through CloudVision (or <code>eos_config_deploy_eapi</code> direct).</li>
+          <li><b>ANTA</b> tests the live network (BGP up, routes present, MLAG healthy). AVD's <code>eos_validate_state</code> generates ANTA tests from the design.</li>
+          <li><b>eAPI</b> is JSON-RPC over HTTPS: send CLI commands, get structured JSON back. Everything else (AVD, CloudVision, ANTA) uses it or gNMI.</li>
+          <li>Inventory groups map to roles: <code>FABRIC</code> &gt; <code>DC1</code> &gt; <code>DC1_SPINES</code>, <code>DC1_L3_LEAVES</code>, plus <code>NETWORK_SERVICES</code> and <code>CONNECTED_ENDPOINTS</code>.</li>
+        </ul></div>
+        <div class="part"><h4>AVD inputs (DC1.yml, trimmed)</h4>
+<pre>fabric_name: FABRIC
+underlay_routing_protocol: ebgp
+overlay_routing_protocol: ebgp
+spine:
+  defaults:
+    platform: cEOS
+    loopback_ipv4_pool: 10.255.0.0/24
+    bgp_as: 65100
+  nodes:
+    - { name: spine1, id: 1, mgmt_ip: 172.20.20.11/24 }
+    - { name: spine2, id: 2, mgmt_ip: 172.20.20.12/24 }
+l3leaf:
+  defaults:
+    loopback_ipv4_pool: 10.255.0.0/24
+    loopback_ipv4_offset: 2
+    vtep_loopback_ipv4_pool: 10.255.1.0/24
+    uplink_switches: [spine1, spine2]
+    uplink_ipv4_pool: 10.255.255.0/24
+    mlag_peer_ipv4_pool: 10.255.252.0/24
+    virtual_router_mac_address: 00:1c:73:00:00:99
+  node_groups:
+    - group: PAIR1
+      bgp_as: 65101
+      nodes:
+        - { name: leaf1, id: 1, uplink_switch_interfaces: [Ethernet1, Ethernet1] }
+        - { name: leaf2, id: 2, uplink_switch_interfaces: [Ethernet2, Ethernet2] }</pre>
+<pre>tenants:                           <span class="c"># NETWORK_SERVICES.yml</span>
+  - name: TENANT_A
+    mac_vrf_vni_base: 10000
+    vrfs:
+      - name: TENANT-A
+        vrf_vni: 50001
+        svis:
+          - { id: 10, name: APP, enabled: true, ip_address_virtual: 10.10.10.1/24 }
+          - { id: 20, name: DB,  enabled: true, ip_address_virtual: 10.20.20.1/24 }
+    l2vlans:
+      - { id: 30, name: L2-ONLY }</pre>
+<pre><span class="c"># eAPI by hand</span>
+management api http-commands
+   protocol https
+   no shutdown
+curl -sk -u admin:admin https://leaf1/command-api -d \
+ '{"jsonrpc":"2.0","method":"runCmds","id":1,
+   "params":{"version":1,"cmds":["show version"],"format":"json"}}'
+
+ansible-playbook playbooks/build.yml      <span class="c"># eos_designs + cli_config_gen</span>
+ansible-playbook playbooks/deploy.yml     <span class="c"># cv_deploy</span>
+anta nrfu -i inventory.yml text            <span class="c"># run tests</span></pre></div>
+      </div>
+      <div class="refs"><span class="lbl">Read</span><span data-ch="30"></span><span data-ch="12"></span><span data-ch="31"></span><span data-ch="32"></span><a class="chip" href="https://avd.arista.com/6.4/docs/user-manual/intro-to-ansible-and-avd.html" target="_blank" rel="noopener"><b>AVD</b>Getting started</a><a class="chip" href="https://avd.arista.com/6.4/docs/data-models/index.html" target="_blank" rel="noopener"><b>AVD</b>Data models</a><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/index.html" target="_blank" rel="noopener"><b>AVD</b>Examples</a><a class="chip" href="https://anta.arista.com/" target="_blank" rel="noopener"><b>ANTA</b>Docs</a><a class="chip lab" data-lab="obj-7-3" href="#"><b>LAB</b>D7</a></div>
+    </div>
+  </article>
+
+  <div class="practice"><h3>Practice: D7</h3>
+    <details class="q"><summary>You need hostname and Loopback0 to differ per device but the BGP template to be shared. How do you lay out configlets?</summary><div class="a"><p>Shared BGP template on the Leaf container; a device configlet (or a configlet builder) per leaf for hostname, router-id, loopbacks and ASN.</p></div></details>
+    <details class="q"><summary>In AVD, where do VLAN 10's SVI and VNI come from?</summary><div class="a"><p>The <code>tenants</code> data model in the network-services group vars: the SVI under the VRF, and the VNI computed from <code>mac_vrf_vni_base</code> + VLAN ID (10000 + 10 = 10010) unless set explicitly.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ R1 WALK ============ -->
+<section class="block" id="walk">
+  <h2>EVPN packet walk</h2>
+  <p class="note">host1 (10.10.10.11, VLAN 10, behind leaf1/leaf2) sends to host2 (10.20.20.11, VLAN 20, behind leaf3/leaf4). Symmetric IRB, VRF TENANT-A, L3 VNI 50001.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>What happens</th><th>Prove it with</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>host2 sends ARP or any frame. leaf3 learns its MAC and IP, and exports a type-2 route with MAC, IP, L2 VNI 10020, L3 VNI 50001, and the router MAC, next hop 10.255.1.5.</td><td><code>show bgp evpn route-type mac-ip 10.20.20.11 detail</code> on leaf3</td></tr>
+      <tr><td class="num">2</td><td>Spines pass it on with the next hop unchanged. leaf1 imports it into TENANT-A (RT 50001:50001) and installs a /32 host route via VTEP 10.255.1.5.</td><td><code>show ip route vrf TENANT-A 10.20.20.11</code> on leaf1</td></tr>
+      <tr><td class="num">3</td><td>host1 sends to its gateway 10.10.10.1 (the anycast gateway on leaf1, virtual MAC 00:1c:73:00:00:99).</td><td><code>show ip arp vrf TENANT-A</code> on leaf1</td></tr>
+      <tr><td class="num">4</td><td>leaf1 routes in TENANT-A, rewrites the inner destination MAC to leaf3's router MAC, and encapsulates with VNI 50001 to 10.255.1.5. The outer UDP source port is a hash of the inner flow.</td><td><code>show vxlan vtep</code> · <code>show interfaces Vxlan1</code></td></tr>
+      <tr><td class="num">5</td><td>Underlay ECMP carries the packet over either spine to 10.255.1.5. Either leaf3 or leaf4 can receive it, since they share the VTEP IP.</td><td><code>show ip route 10.255.1.5</code> (two next hops)</td></tr>
+      <tr><td class="num">6</td><td>leaf3 decapsulates, sees VNI 50001 so routes in TENANT-A, finds host2 in VLAN 20 and bridges it out of the host port.</td><td><code>show mac address-table address &lt;host2-mac&gt;</code></td></tr>
+      <tr><td class="num">—</td><td>Broadcast in VLAN 10 instead: leaf1 replicates to every VTEP that sent a type-3 route for VNI 10010.</td><td><code>show bgp evpn route-type imet</code> · <code>show vxlan flood vtep</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ R2 TSHOOT ============ -->
+<section class="block" id="tshoot">
+  <h2>Troubleshooting ladder</h2>
+  <p class="note">Climb from the bottom. Don't touch EVPN until the rung under it is clean.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Rung</th><th>Question</th><th>Command</th><th>Common fault</th></tr></thead>
+    <tbody>
+      <tr><td>7 Overlay L3</td><td>Does the VRF have the remote host/prefix?</td><td><code>show ip route vrf TENANT-A</code></td><td>L3 VNI or VRF RT missing</td></tr>
+      <tr><td>6 Overlay L2</td><td>Are type-2 and type-3 routes exchanged?</td><td><code>show bgp evpn summary</code>, <code>route-type imet</code></td><td>No send-community, no next-hop-unchanged</td></tr>
+      <tr><td>5 VXLAN</td><td>Are VTEPs known and mappings consistent?</td><td><code>show vxlan config-sanity</code>, <code>show vxlan vtep</code></td><td>VLAN/VNI mismatch, Loopback1 not advertised</td></tr>
+      <tr><td>4 Underlay</td><td>Can Loopback0/1 reach every other loopback over all paths?</td><td><code>show ip bgp summary</code>, <code>ping … source Loopback1</code></td><td>AF not activated, maximum-paths 1</td></tr>
+      <tr><td>3 MLAG</td><td>Is the pair active and consistent?</td><td><code>show mlag</code>, <code>show mlag config-sanity</code></td><td>Config mismatch, peer link down</td></tr>
+      <tr><td>2 Link/LAG</td><td>Are ports up and bundled?</td><td><code>show port-channel summary</code>, <code>show lldp neighbors</code></td><td>LACP mode, wrong cabling, errdisable</td></tr>
+      <tr><td>1 Physical</td><td>Light levels, errors, MTU?</td><td><code>show interfaces counters errors</code>, <code>… transceiver</code></td><td>Dirty optic, MTU mismatch, FEC</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ R3 CHEAT ============ -->
+<section class="block" id="cheat">
+  <h2>Show-command sheet</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Domain</th><th>Commands</th></tr></thead>
+    <tbody>
+      <tr><td>D1</td><td><code>show version</code> <code>show boot-config</code> <code>show extensions</code> <code>show configuration sessions</code> <code>show config checkpoints</code> <code>show running-config diffs</code> <code>show maintenance</code> <code>show agent logs crash</code></td></tr>
+      <tr><td>D2</td><td><code>show daemon TerminAttr</code> <code>show management api http-commands</code> <code>show zerotouch</code> <code>show running-config | section daemon</code></td></tr>
+      <tr><td>D3</td><td><code>show schedule summary</code> <code>show event-handler</code> <code>show event-monitor mac</code> <code>show sflow</code> <code>show monitor session</code> <code>show queue-monitor length</code> <code>show interfaces counters errors</code> <code>show logging</code></td></tr>
+      <tr><td>D4</td><td><code>show mlag</code> <code>show mlag config-sanity</code> <code>show mlag interfaces</code> <code>show port-channel summary</code> <code>show lacp neighbor</code> <code>show spanning-tree</code> <code>show ip virtual-router</code> <code>show vrrp brief</code></td></tr>
+      <tr><td>D5</td><td><code>show ip bgp summary</code> <code>show ip route bgp</code> <code>show bfd peers</code> <code>show ip ospf neighbor</code> <code>show isis neighbors</code> <code>show ip bgp neighbors X advertised-routes</code></td></tr>
+      <tr><td>D6</td><td><code>show interfaces Vxlan1</code> <code>show vxlan config-sanity detail</code> <code>show vxlan vtep</code> <code>show vxlan address-table</code> <code>show vxlan flood vtep</code> <code>show bgp evpn summary</code> <code>show bgp evpn route-type mac-ip</code> <code>show bgp evpn route-type imet</code> <code>show bgp evpn route-type ip-prefix ipv4</code> <code>show bgp evpn route-type ethernet-segment</code> <code>show bgp evpn instance</code> <code>show ip route vrf TENANT-A</code></td></tr>
+      <tr><td>D7</td><td><code>show management api http-commands</code> <code>show running-config | json</code> <code>show interfaces | json</code> <code>anta nrfu</code></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Add <code>| json</code> to almost any show command for structured output. Add <code>| section X</code> or <code>| include X</code> to filter config.</p>
+</section>
+
+<!-- ============ R4 SOURCES ============ -->
+<section class="block" id="sources">
+  <h2>Sources</h2>
+  <div class="prose">
+    <p>The exam facts come from Arista's published datasheets (checked 25 Oct 2026). The technical content is written from public Arista documentation, AVD, and the RFCs. <i>Arista Warrior</i> links open the chapter in VitalSource Bookshelf and need your login; the guide doesn't reproduce any of the book's text.</p>
+    <ul>
+      <li><a href="https://www.training.arista.com/hubfs/Arista_Academy_Exam_Datasheets/Data%20Center.pdf" target="_blank" rel="noopener">Arista Academy exam datasheet: Data Center</a></li>
+      <li><a href="https://www.training.arista.com/hubfs/Track%20Datasheets/Arista%20Academy%20Datasheet%20-%20Data%20Center.pdf?hsLang=en" target="_blank" rel="noopener">Arista Academy track datasheet: Data Center (DCOPS/DCENG outlines)</a></li>
+      <li><a href="https://www.fastlaneus.com/certification/arista-dcpr" target="_blank" rel="noopener">Fast Lane: ACE Professional Data Center (AN-DC-PR)</a></li>
+      <li><a href="https://www.arista.com/en/um-eos" target="_blank" rel="noopener">EOS User Manual</a> · <a href="https://www.arista.com/en/solutions/design-guides" target="_blank" rel="noopener">Arista design and deployment guides</a></li>
+      <li><a href="https://avd.arista.com/6.4/index.html" target="_blank" rel="noopener">Arista Validated Designs 6.4</a> · <a href="https://anta.arista.com/" target="_blank" rel="noopener">ANTA</a></li>
+      <li>RFC <a href="https://www.rfc-editor.org/rfc/rfc7348" target="_blank" rel="noopener">7348</a> (VXLAN), <a href="https://www.rfc-editor.org/rfc/rfc7432" target="_blank" rel="noopener">7432</a> (EVPN), <a href="https://www.rfc-editor.org/rfc/rfc8365" target="_blank" rel="noopener">8365</a> (EVPN overlay), <a href="https://www.rfc-editor.org/rfc/rfc9135" target="_blank" rel="noopener">9135</a> (IRB), <a href="https://www.rfc-editor.org/rfc/rfc9136" target="_blank" rel="noopener">9136</a> (type 5), <a href="https://www.rfc-editor.org/rfc/rfc7938" target="_blank" rel="noopener">7938</a> (BGP in the DC)</li>
+      <li>Donahue, <i>Arista Warrior</i>, 2nd ed., O'Reilly, ISBN 9781491952993 (chapter index in <code>book/arista-warrior-index.md</code>)</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+</div>
+
+<footer><div class="wrap">
+  <p>Domain and objective numbers match <code>docs/exam-objectives.md</code> and the lab guide. Config examples are written for EOS 4.30 and later; check syntax against your lab's EOS version.</p>
+</div></footer>
+
+<script>
+(function(){
+  // Lab guide location. Change this one value if the lab guide is published elsewhere.
+  var LAB_URL = "../labs/lab-guide.html";
+
+  var BOOK = "https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/";
+  var CH = {
+    2:["Network Designs","16%5B%3Bvnd.vst.idref%3Dchapter-idm45591791393480%5D!/4/2/2%5Bnetwork_designs%5D/2/2/1:0"],
+    3:["Buffers","18%5B%3Bvnd.vst.idref%3Dchapter-idm45591791346920%5D!/4/2/2%5Bbuffers%5D"],
+    4:["Merchant Silicon","20%5B%3Bvnd.vst.idref%3Dchapter-idm45591791145880%5D!/4/2/2%5Bmerchant_silicon%5D"],
+    5:["Fabric Speed","22%5B%3Bvnd.vst.idref%3Dchapter-idm45591791040040%5D!/4/2/2%5Bfabric_speed%5D"],
+    7:["SysDB","26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D"],
+    8:["Introduction to EOS","28%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633624%5D!/4/2/2%5Bintroduction_to_eos%5D"],
+    9:["Configuration Management","30%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633000%5D!/4/2/2%5Bconfiguration_management%5D"],
+    10:["Upgrading EOS","32%5B%3Bvnd.vst.idref%3Dchapter-idm45591789973048%5D!/4/2/2%5Bupgrading_eos%5D"],
+    11:["LLDP","34%5B%3Bvnd.vst.idref%3Dchapter-idm45591789862360%5D!/4/2/2%5Blink_layer_discovery_protocol%5D"],
+    12:["Bash","36%5B%3Bvnd.vst.idref%3Dchapter-idm45591789861832%5D!/4/2/2%5Bbash_idd0020%5D"],
+    13:["Zero-Touch Provisioning","38%5B%3Bvnd.vst.idref%3Dchapter-idm45591789811160%5D!/4/2/2%5Bzero-touch_provisioning%5D"],
+    14:["Aboot","40%5B%3Bvnd.vst.idref%3Dchapter-idm45591789701256%5D!/4/2/2%5Baboot%5D"],
+    15:["CloudVision","42%5B%3Bvnd.vst.idref%3Dchapter-idm45591789292984%5D!/4/2/2%5Bcloudvision_idd0025%5D"],
+    16:["EOS Extensions","44%5B%3Bvnd.vst.idref%3Dchapter-idm45591788960200%5D!/4/2/2%5Bthe_eos_extension_system%5D"],
+    17:["MSTP","46%5B%3Bvnd.vst.idref%3Dchapter-idm45591788964376%5D!/4/2/2%5Bmultiple_spanning_tree_protocol%5D"],
+    18:["MLAG","48%5B%3Bvnd.vst.idref%3Dchapter-idm45591788536296%5D!/4/2/2%5Bmlag%5D"],
+    19:["First-Hop Redundancy","50%5B%3Bvnd.vst.idref%3Dchapter-idm45591788535880%5D!/4/2/2%5Bfirst-hop_redundancy%5D"],
+    20:["FlexRoute","52%5B%3Bvnd.vst.idref%3Dchapter-idm45591787817160%5D!/4/2/2%5Bflexroute_idd0037%5D"],
+    21:["VXLAN","54%5B%3Bvnd.vst.idref%3Dchapter-idm45591787816696%5D!/4/2/2%5Bvxlan%5D"],
+    22:["Email","56%5B%3Bvnd.vst.idref%3Dchapter-idm45591787367656%5D!/4/2/2%5Bemail%5D"],
+    23:["LANZ","58%5B%3Bvnd.vst.idref%3Dchapter-idm45591787280968%5D!/4/2/2%5Blanz%5D"],
+    24:["Scheduler","60%5B%3Bvnd.vst.idref%3Dchapter-idm45591787083224%5D!/4/2/2%5Bscheduler%5D"],
+    25:["tcpdump & Mirroring","62%5B%3Bvnd.vst.idref%3Dchapter-idm45591787081640%5D!/4/2/2%5Btcpdump_and_advanced_mirroring%5D"],
+    26:["Tap Aggregation","64%5B%3Bvnd.vst.idref%3Dchapter-idm45591786736824%5D!/4/2/2%5Btap_aggregation%5D"],
+    27:["Event Manager","66%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609816%5D!/4/2/2%5Bevent_manager%5D"],
+    28:["Event Monitor","68%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609512%5D!/4/2/2%5Bevent_monitor%5D"],
+    29:["Troubleshooting","70%5B%3Bvnd.vst.idref%3Dchapter-idm45591786023480%5D!/4/2/2%5Btroubleshooting%5D"],
+    30:["eAPI","72%5B%3Bvnd.vst.idref%3Dchapter-idm45591785781384%5D!/4/2/2%5Beapi%5D"],
+    31:["Containers","74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D"],
+    32:["vEOS","76%5B%3Bvnd.vst.idref%3Dchapter-idm45591785360776%5D!/4/2/2%5Bveos_idd0052%5D"]
+  };
+  document.querySelectorAll("[data-ch]").forEach(function(el){
+    var n = el.getAttribute("data-ch"), c = CH[n];
+    if(!c) return;
+    var a = document.createElement("a");
+    a.className = "chip"; a.href = BOOK + c[1]; a.target = "_blank"; a.rel = "noopener";
+    a.title = "Arista Warrior, chapter " + n + " (VitalSource)";
+    a.innerHTML = "<b>AW " + n + "</b>" + c[0].replace(/&/g,"&amp;");
+    el.replaceWith(a);
+  });
+
+  document.querySelectorAll("a[data-lab]").forEach(function(a){
+    var obj = a.getAttribute("data-lab");
+    a.href = LAB_URL + "#" + obj;
+    a.target = "_blank"; a.rel = "noopener";
+    a.title = "Open the lab for objective " + obj.replace("obj-","").replace("-",".");
+  });
+
+  // Confidence ticks, kept in this browser only.
+  var KEY = "l5dc-study-confidence";
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch(e) { state = {}; }
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".obj .conf input"));
+  function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
+  function render(){
+    var done = 0;
+    for (var d = 1; d <= 7; d++){
+      var inDom = boxes.filter(function(b){ return b.closest(".obj").getAttribute("data-dom") == d; });
+      var n = inDom.filter(function(b){ return b.checked; }).length;
+      done += n;
+      var el = document.querySelector('[data-pct="'+d+'"]');
+      if (el) el.textContent = n + "/" + inDom.length;
+    }
+    var pct = boxes.length ? Math.round(done / boxes.length * 100) : 0;
+    document.getElementById("meter-all").style.width = pct + "%";
+    document.getElementById("meter-all-txt").textContent = done + " of " + boxes.length + " objectives ticked (" + pct + "%). Saved in this browser.";
+  }
+  boxes.forEach(function(b){
+    b.checked = !!state[b.id];
+    b.addEventListener("change", function(){ state[b.id] = b.checked; save(); render(); });
+  });
+  render();
+
+  if (location.hash) { var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+})();
+</script>
+</body>
+</html>
