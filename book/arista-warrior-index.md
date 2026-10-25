@@ -29,3 +29,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 48 | MLAG | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/48%5B%3Bvnd.vst.idref%3Dchapter-idm45591788536296%5D!/4/2/2%5Bmlag%5D) |
 | 50 | First-Hop Redundancy | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/50%5B%3Bvnd.vst.idref%3Dchapter-idm45591788535880%5D!/4/2/2%5Bfirst-hop_redundancy%5D) |
 | 52 | FlexRoute | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/52%5B%3Bvnd.vst.idref%3Dchapter-idm45591787817160%5D!/4/2/2%5Bflexroute_idd0037%5D) |
+| 54 | VXLAN | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/54%5B%3Bvnd.vst.idref%3Dchapter-idm45591787816696%5D!/4/2/2%5Bvxlan%5D) |
