@@ -793,6 +793,9 @@ show tap aggregation groups</pre></div>
           <li>Software: crashed agents leave logs; <code>show agent logs crash</code>. CPU spikes: <code>show processes top once</code>.</li>
           <li>Hardware tables: <code>show hardware capacity</code> for TCAM and route/MAC limits. A route can be in the RIB but not in the ASIC: <code>show ip route</code> warns and marks those with <code>*</code>. <span class="pg">AW 20 p.108</span></li>
           <li><code>show tech-support</code> is what TAC wants; the scheduler keeps hourly copies.</li>
+          <li>Logs: <code>show logging follow</code> is the EOS version of <code>tail -f</code>. The Linux logs are in <code>/var/log</code> (RAM), and <code>messages</code> needs <code>sudo</code>. Switches with an SSD archive old logs to <code>drive:</code> (<code>/mnt/drive</code>), which survives reboots. <span class="pg">AW 29 p.156</span></li>
+          <li>Reading <code>top</code>: the <code>%Cpu(s)</code> line splits time into user, system, nice, idle, I/O wait, interrupts and steal. High idle is healthy. It's control-plane only: the ASIC forwards packets, so high CPU hurts protocols, not forwarding. <span class="pg">AW 29 p.156–158</span></li>
+          <li>Tracing is EOS's version of debug: you trace an <em>agent</em>, not a protocol. Find it with <code>show agent names</code>, list its facilities with <code>show trace &lt;agent&gt;</code>, send output to a file, enable facilities, read the file, then turn it all off. <code>debug ip</code> only covers a little. <span class="pg">AW 29 p.158–160</span></li>
         </ul></div>
         <div class="part"><h4>Commands</h4>
 <pre>show interfaces status errdisabled
@@ -805,15 +808,30 @@ show agent logs crash
 show processes top once
 show hardware capacity
 show system environment all
-show version | include memory|uptime</pre></div>
+show version | include memory|uptime
+show logging follow
+bash sudo tail -50 /var/log/messages
+show agent names | include -i bgp
+<span class="c">! trace workflow (config mode)</span>
+trace Bgp filename flash:Bgp.txt
+trace Bgp enable &lt;Facility&gt; all  <span class="c">! copy exact names from show trace Bgp</span>
+trace monitor Bgp                  <span class="c">! Ctrl-C to stop; no grep</span>
+bash tail -f /mnt/flash/Bgp.txt | grep 10.255.255
+no trace Bgp enable * all
+no trace Bgp filename flash:Bgp.txt
+delete flash:Bgp.txt</pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
           <li>Counters stop incrementing after the fix: <code>clear counters</code>, wait, re-check.</li>
+          <li>After tracing: <code>show running-config | include trace</code> is empty and <code>dir flash:</code> has its space back.</li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>An errdisabled port (BPDU guard, link-flap) needs <code>shutdown</code> / <code>no shutdown</code> or errdisable recovery after the cause is fixed.</li>
           <li>Speed/FEC mismatch on 25G/100G links leaves the link down with both sides "notconnect".</li>
+          <li>Traces keep running and filling flash until you stop them, and there is no single "undebug all": run <code>no trace &lt;agent&gt; enable * all</code> for each agent, then delete the files. <span class="pg">AW 29 p.160</span></li>
+          <li>Trace facility names must match <code>show trace &lt;agent&gt;</code> exactly, including case and the <code>::</code>. A lowercase or all-caps version is rejected. <span class="pg">AW 29 p.159</span></li>
+          <li>Which agent? With the multi-agent routing model (the default on current EOS) BGP runs in the <code>Bgp</code> agent. In the book's 4.21 ribd model it was <code>Rib</code>, with facilities like <code>Rib::Bgp::*</code>. <span class="pg">AW 29 p.158–159</span></li>
           <li>BGP shows the prefixes received, so it "looks fine", but traffic to some of them drops: they're not programmed in hardware. Count them with <code>show ip route | grep ^* | wc -l</code>. <span class="pg">AW 20 p.108</span></li>
         </ul></div>
       </div>
@@ -832,6 +850,17 @@ ip hardware fib optimize prefixes profile internet
 agent SandL3Unicast terminate     <span class="c">! 7280R/7500R L3 agent; L3 forwarding pauses</span>
 show ip route | grep ^* | wc -l
 show ip route summary</pre></div>
+        <div class="part"><h4>Arista Warrior ch. 29, Troubleshooting: notes by page</h4><ul>
+          <li><b>p.156</b> <code>show logging follow</code> streams the syslog live. In bash, <code>/var/log</code> holds the usual Linux logs plus EOS ones (agents, cli, eventMon.db); <code>messages</code> is everything you'd see on the console and is readable only with <code>sudo</code>. Anything outside <code>flash:</code> is gone after a reboot, except log archives the switch copies to an SSD (<code>drive:</code>) if it has one.</li>
+          <li><b>p.156</b> <code>show processes top once</code> gives one snapshot of <code>top</code>, sorted by CPU. Process order jumps around between samples, which is normal. The load average shows 1, 5 and 15 minute values; what's normal varies by platform, so know your baseline. The author treats a value above about 26 as a sign something is wrong.</li>
+          <li><b>p.156–158</b> <code>%Cpu(s)</code> fields: <code>us</code> user (mostly agents), <code>sy</code> kernel, <code>ni</code> niced (almost always 0), <code>id</code> idle (higher is better), <code>wa</code> I/O wait, <code>hi</code>/<code>si</code> hardware and software interrupts, <code>st</code> stolen by a hypervisor. If CPU stays high, open a TAC case.</li>
+          <li><b>p.158</b> <code>debug ip</code> covers only a few IP and OSPF topics. Tracing does much more, and unlike debug elsewhere it won't take priority over other processes or flood the console, but it does use resources. <code>show agent names</code> lists every traceable agent. Some aren't running by default (<code>show trace Bgp</code> says "not running" until the multi-agent model is on).</li>
+          <li><b>p.158–159</b> <code>show trace &lt;agent&gt;</code> lists that agent's facilities. Steps: set <code>trace &lt;agent&gt; filename flash:…</code> (Arista suggests <code>flash:</code> or <code>drive:</code>), then <code>trace &lt;agent&gt; enable &lt;facility&gt; all</code>. A wildcard like <code>Rib::Bgp::*</code> picks all BGP facilities; <code>levels</code> lets you pick 0–9, coverage or function instead of <code>all</code>. Some facilities appear only while the protocol is running.</li>
+          <li><b>p.160</b> The wildcard is expanded into one long <code>trace … setting</code> line in running-config. Watch the file with <code>trace monitor &lt;agent&gt;</code> (blocks the CLI until Ctrl-C and can't be piped to grep) or, better, <code>bash tail -f /mnt/flash/&lt;file&gt; | grep …</code>.</li>
+          <li><b>p.160–161</b> Turn it off: a few traces left running for an hour filled the book's lab flash. Disable each agent with <code>no trace &lt;agent&gt; enable * all</code>, copy the file off if TAC wants it (<code>copy flash:… scp:</code> etc.), delete it, and remove the <code>filename</code> lines. Writing traces to your home directory is worse, because it is in RAM.</li>
+          <li><b>p.161</b> CLI standalone mode: when Sysdb is too busy (the book's case was a huge <code>configure replace</code>), SSH may drop you into a "Standalone" CLI that doesn't talk to the other agents. It shows only a bare config and no interfaces. Don't panic: wait a minute or two and log in again. <code>Cli -l</code> is the option behind it. If it doesn't clear, call TAC or reload.</li>
+          <li><b>p.161</b> Help: Arista TAC (phone or email for non-urgent cases; registered customers also get software and docs) and the EOS Central / Arista community forum with tech tips.</li>
+        </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="29"></span><span data-ch="11"></span><span data-ch="20"></span><a class="chip lab" data-lab="obj-3-4" href="#"><b>LAB</b>D3</a></div>
     </div>
@@ -1617,7 +1646,7 @@ anta nrfu -i inventory.yml text            <span class="c"># run tests</span></p
     <tbody>
       <tr><td>D1</td><td><code>show version</code> <code>show boot-config</code> <code>show extensions</code> <code>show configuration sessions</code> <code>show config checkpoints</code> <code>show running-config diffs</code> <code>show maintenance</code> <code>show agent logs crash</code></td></tr>
       <tr><td>D2</td><td><code>show daemon TerminAttr</code> <code>show management api http-commands</code> <code>show zerotouch</code> <code>show running-config | section daemon</code></td></tr>
-      <tr><td>D3</td><td><code>show schedule summary</code> <code>show event-handler</code> <code>show event-monitor mac</code> <code>show sflow</code> <code>show monitor session</code> <code>show queue-monitor length</code> <code>show interfaces counters errors</code> <code>show logging</code></td></tr>
+      <tr><td>D3</td><td><code>show schedule summary</code> <code>show event-handler</code> <code>show event-monitor mac</code> <code>show sflow</code> <code>show monitor session</code> <code>show queue-monitor length</code> <code>show interfaces counters errors</code> <code>show logging</code> <code>show logging follow</code> <code>show processes top once</code> <code>show agent names</code> <code>show trace &lt;agent&gt;</code> <code>trace monitor &lt;agent&gt;</code></td></tr>
       <tr><td>D4</td><td><code>show mlag</code> <code>show mlag config-sanity</code> <code>show mlag interfaces</code> <code>show port-channel summary</code> <code>show lacp neighbor</code> <code>show spanning-tree</code> <code>show ip virtual-router</code> <code>show vrrp brief</code></td></tr>
       <tr><td>D5</td><td><code>show ip bgp summary</code> <code>show ip route bgp</code> <code>show bfd peers</code> <code>show ip ospf neighbor</code> <code>show isis neighbors</code> <code>show ip bgp neighbors X advertised-routes</code></td></tr>
       <tr><td>D6</td><td><code>show interfaces Vxlan1</code> <code>show vxlan config-sanity detail</code> <code>show vxlan vtep</code> <code>show vxlan address-table</code> <code>show vxlan flood vtep</code> <code>show bgp evpn summary</code> <code>show bgp evpn route-type mac-ip</code> <code>show bgp evpn route-type imet</code> <code>show bgp evpn route-type ip-prefix ipv4</code> <code>show bgp evpn route-type ethernet-segment</code> <code>show bgp evpn instance</code> <code>show ip route vrf TENANT-A</code></td></tr>
