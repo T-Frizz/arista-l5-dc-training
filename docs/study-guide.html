@@ -668,7 +668,7 @@ Topology    &gt; Settings &gt; custom hierarchy by tag</pre></div>
         <div class="part"><h4>Know</h4><ul>
           <li><b>SNMP</b>: prefer v3 with auth and privacy. Bind to the MGMT VRF.</li>
           <li><b>sFlow</b>: sampled packet headers plus counters to a collector. Good for top talkers.</li>
-          <li><b>LANZ</b>: microsecond queue-depth reporting. Shows microbursts that average counters hide.</li>
+          <li><b>LANZ</b>: sub-millisecond queue-depth reporting from the ASIC. SNMP graphs average over 5 minutes and hide microbursts that fill buffers and drop packets. LANZ only reports; it doesn't change how traffic flows. Hardware-only, so not in vEOS or cEOS. <span class="pg">AW 23 p.123</span></li>
           <li><b>Port mirroring</b>: local SPAN, remote via GRE, or to the CPU so you can run tcpdump on the switch.</li>
           <li><b>TAP aggregation</b>: turns a switch into a packet broker. Tap ports in, tool ports out, with filters.</li>
           <li><code>watch</code> re-runs a command every N seconds; useful on counters.</li>
@@ -683,8 +683,13 @@ sflow destination 192.168.0.20
 sflow source-interface Management1
 sflow run
 
-queue-monitor length
-show queue-monitor length
+queue-monitor length                  <span class="c">! LANZ on, globally</span>
+queue-monitor length notifying        <span class="c">! S/U/E records instead of polling</span>
+interface Ethernet48
+   queue-monitor length thresholds 40962 10241   <span class="c">! high low, bytes</span>
+show queue-monitor length status
+show queue-monitor length Ethernet48
+show queue-monitor length csv &gt; flash:lanz.csv
 
 monitor session CAP source Ethernet5 both
 monitor session CAP destination Cpu
@@ -697,12 +702,25 @@ watch 2 show interfaces Ethernet1 counters rates</pre></div>
         <div class="part"><h4>Verify</h4><ul>
           <li><code>show sflow</code> · <code>show snmp user</code></li>
           <li><code>show monitor session</code></li>
-          <li><code>show queue-monitor length</code> · <code>show tap aggregation groups</code></li>
+          <li><code>show queue-monitor length status</code> (mode, per-port thresholds) · <code>show tap aggregation groups</code></li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>tcpdump on a front-panel interface only sees traffic to or from the CPU. Mirror to Cpu to see transit traffic.</li>
           <li>sFlow source in the wrong VRF; datagrams never reach the collector.</li>
           <li>TAP aggregation <code>mode exclusive</code> turns all switching off on that switch.</li>
+          <li>LANZ thresholds: on some platforms tab-completing gives <code>threshold</code> (singular), which sets only the high mark. Type <code>thresholds &lt;high&gt; &lt;low&gt;</code>. Units differ by platform (bytes on newer ASICs, buffer segments on older ones); check with <code>?</code>. <span class="pg">AW 23 p.125</span></li>
+          <li>Writing CSV output to a non-persistent location; save to <code>flash:</code> if it must survive a reboot. <span class="pg">AW 23 p.126</span></li>
+        </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 23, LANZ: notes by page</h4><ul>
+          <li><b>p.123</b> <code>show interfaces</code> has no buffer information because buffer state changes faster than you can read it. Throughput from SNMP is the difference between two octet counters divided by the poll interval, so a calm 5-minute average can hide a second full of bursts over line rate. LANZ reads queue depth from the ASIC at sub-millisecond granularity, on supported hardware only.</li>
+          <li><b>p.123–124</b> Model a port buffer as a tank filled faster than it drains. LANZ uses a high and a low queue threshold: crossing the high mark logs a Start (S) record, Update (U) records follow while it stays congested, and dropping under the low mark logs an End (E) record. LANZ watches the buffer; it doesn't do flow control.</li>
+          <li><b>p.124</b> Two modes. Polling (P records, roughly "was there congestion in the last second") is the default on some platforms such as the 7280R. Notifying mode gives the detailed S/U/E records but uses more hardware resources.</li>
+          <li><b>p.124–125</b> The book's lab makes congestion on demand: a static-route loop between two switches, one port shaped down to 5 Gbps with <code>shape rate</code>, then a burst of UDP from <code>iperf</code> in bash. <code>load-interval 1</code> makes the interface rates readable second by second.</li>
+          <li><b>p.125</b> Enable LANZ globally with <code>queue-monitor length</code>, then set per-interface thresholds (high then low). <code>show queue-monitor length status</code> shows the mode and every port's thresholds. <code>show queue-monitor length &lt;intf&gt;</code> shows the records with queue length and duration.</li>
+          <li><b>p.125</b> The Ingress Port-set column lists every port on the same ASIC core as the congested port, so it narrows down where the burst came in, not the exact port. <code>show platform jericho mapping</code> shows the port-to-core mapping on Jericho-based switches.</li>
+          <li><b>p.126</b> For analysis, CloudVision graphs LANZ data, and it can be streamed out (Google Protocol Buffers). Without those, the <code>csv</code> keyword dumps up to the last 100,000 over-threshold events, oldest first; redirect it to a file on <code>flash:</code> and open it in a spreadsheet.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="23"></span><span data-ch="25"></span><span data-ch="26"></span><span data-ch="3"></span><a class="chip lab" data-lab="obj-3-3" href="#"><b>LAB</b>D3</a></div>
@@ -766,6 +784,7 @@ show ip route summary</pre></div>
   <div class="practice"><h3>Practice: D3</h3>
     <details class="q"><summary>Save the output of "show ip bgp summary" every 15 minutes, keeping one day of files.</summary><div class="a"><pre>schedule bgp-sum interval 15 max-log-files 96 command show ip bgp summary</pre></div></details>
     <details class="q"><summary>A host says it moved last night. How do you prove when and where its MAC moved?</summary><div class="a"><p><code>show event-monitor mac match-mac &lt;mac&gt;</code> on the switch, or endpoint search in CloudVision, which keeps location history.</p></div></details>
+    <details class="q"><summary>Users report slow backups at 02:00, but the 5-minute SNMP graph for the storage uplink never passes 40%. How do you prove or rule out microbursts?</summary><div class="a"><p>Enable LANZ (<code>queue-monitor length</code>, ideally <code>notifying</code>), set thresholds on the uplink, and after the next backup check <code>show queue-monitor length &lt;intf&gt;</code> for S/U/E records, or dump <code>csv</code> to flash. Also check output discards on the interface. (AW ch.23 p.123–126)</p></div></details>
     <details class="q"><summary>You run tcpdump on Ethernet5 and see none of the host's traffic to another host. Why?</summary><div class="a"><p>EOS tcpdump on an interface only shows CPU-bound frames. Transit traffic is switched in hardware. Mirror the port to <code>Cpu</code> and capture on <code>mirror0</code>.</p></div></details>
   </div>
 </section>
