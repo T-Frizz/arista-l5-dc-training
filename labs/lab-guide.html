@@ -1389,14 +1389,16 @@ leaf1# dir flash:schedule/bgp-snap/
 leaf1# bash zcat /mnt/flash/schedule/bgp-snap/*.gz | head -30
 
 leaf1# show running-config all | include event-monitor
+! off by default since EOS 4.21; enable it if needed
+leaf1(config)# event-monitor
 leaf1# show event-monitor mac
 leaf1# show event-monitor arp
 leaf1# show event-monitor route
 leaf1# show event-monitor route match-ip 10.255.1.5/32
-leaf1# show event-monitor sqlite select * from route where prefix like '10.255.1.5%' order by time desc limit 10;
-! "event-monitor interact" opens the sqlite3 shell; type .tables to list the tables, .quit to leave
-leaf1# event-monitor interact</code></pre>
-      <p>Check the filters with <code>show event-monitor route ?</code>; field and table names can differ slightly by release, so look at <code>.tables</code> and <code>.schema route</code> before writing SQL. To keep history across reboots configure a backup path (<code>event-monitor backup path ?</code>).</p>
+leaf1# bash sqlite3 /var/log/eventMon.db "select * from route where prefix like '10.255.1.5%' order by time desc limit 10;"
+! open the database interactively: .tables lists tables, .quit leaves
+leaf1# bash sqlite3 /var/log/eventMon.db</code></pre>
+      <p>Check the filters with <code>show event-monitor route ?</code>; field and table names can differ slightly by release, so look at <code>.tables</code> and <code>.schema route</code> before writing SQL. The older <code>show event-monitor sqlite</code> and <code>event-monitor interact</code> commands stopped working after EOS 4.16, which is why the solution uses <code>bash sqlite3</code> (AW Ch 28, p. 150). To keep history across reboots configure a backup path; the <a href="#lab-d3-evmon">Event Monitor drill</a> covers it.</p>
     </details>
     <details class="solution"><summary>Solution · event handlers (leaf1)</summary>
       <pre class="cli"><code>leaf1(config)# event-handler UPLINK-WATCH
@@ -1550,6 +1552,88 @@ leaf1# show event-handler CFG-BACKUP</code></pre>
       <p>Symptom: no backup files appear, and the log shows the handler triggered and then failed.</p>
       <details class="solution"><summary>Root cause and fix</summary>
         <p>The script is not executable, so bash refuses to run it (exit code 126 in the failure message). Fix it with <code>bash chmod +x /mnt/flash/cfg-backup.sh</code>, or change the action to <code>action bash bash /mnt/flash/cfg-backup.sh</code>. Run <code>write memory</code> again and check <code>/mnt/flash/cfg-backup/</code>.</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="part" id="lab-d3-evmon">
+    <h3>Event Monitor: prove what changed and when</h3>
+    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/68%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609512%5D!/4/2/2%5Bevent_monitor%5D" target="_blank" rel="noopener">AW Ch 28 · Event Monitor</a> (pp. 150-156). Event monitor is part of objective 3.1, and it is the fastest way to answer "what changed?" during troubleshooting. Everything here runs on cEOS.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Event monitor writes changes to the ARP, MAC, route, LACP, IGMP snooping and mroute tables into a SQLite database at <code>/var/log/eventMon.db</code> (p. 150). Since EOS 4.21 it is off by default. The error you get when it is off suggests <code>event-monitor sync</code>, but that does not turn it on; the config command <code>event-monitor</code> does (p. 150). The old <code>show event-monitor sqlite</code> and <code>interact</code> commands stopped working after EOS 4.16, so for SQL use <code>bash sqlite3 /var/log/eventMon.db</code>, and for everyday work use the CLI filters: <code>match-interface</code>, <code>match-mac</code>, <code>match-ip</code>, <code>match-time</code> and <code>group-by</code> (pp. 150-151). The CLI accepts short interface names like <code>e5</code>; raw SQL needs the exact stored name, such as <code>Ethernet5</code> (p. 151). <code>/var/log</code> is wiped on reboot, so set a backup path on flash to keep history (p. 155).</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, check whether event monitor is running. If it is not, enable it. List the table options with <code>show event-monitor ?</code>.</p></li>
+      <li><p>Find host1's MAC address for VLAN 10 (on host1, <code>show interfaces Vlan10</code>), ping the gateway from host1's VRF <code>H10</code>, and show that MAC's history on leaf1 with <code>match-mac</code>.</p></li>
+      <li><p>Simulate a "host moved" ticket: shut leaf1 <code>Ethernet5</code> for 20 seconds, then bring it back, and keep host1 pinging the whole time. Use <code>match-mac</code> again to show when the MAC moved off <code>Port-Channel5</code>, where it went, and when it came back.</p></li>
+      <li><p>Read the LACP events from that flap, first plain, then with <code>verbose</code>. Name the state host1's link went through.</p></li>
+      <li><p>Flap leaf3's <code>Loopback0</code> (10.255.0.5) and use <code>match-ip</code> on leaf1 to show the route being removed and re-added. Then add and remove a static route <code>ip route 20.20.20.0/24 Null0</code> on leaf1 and find both events.</p></li>
+      <li><p>Show the ARP table history grouped by IP address, and only the ARP events for <code>Ethernet1</code> using the short name <code>e1</code>. Then try the same filter in raw SQL with <code>intf='e1'</code> and explain why it returns nothing.</p></li>
+      <li><p>Make the history survive a reboot: store it on flash as <code>em.log</code> and keep 10 files. Find the files with <code>dir flash:</code>.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · enable, MAC history, host move</summary>
+      <pre class="cli"><code>leaf1# show event-monitor arp
+! "% event-monitor not running" means it is off; event-monitor sync will not fix that
+leaf1(config)# event-monitor
+leaf1# show event-monitor ?
+
+host1# show interfaces Vlan10 | include address
+host1# ping vrf H10 10.10.10.1 repeat 1000 interval 1
+
+leaf1# show event-monitor mac match-mac 00:1c:73:31:00:01
+leaf1(config)# interface Ethernet5
+leaf1(config-if-Et5)# shutdown
+! wait 20 s
+leaf1(config-if-Et5)# no shutdown
+leaf1# show event-monitor mac match-mac 00:1c:73:31:00:01</code></pre>
+      <pre class="out"><code>2026-10-25 13:02:10.418|10|00:1c:73:31:00:01|Port-Channel5|learnedDynamicMac|added|41
+2026-10-25 13:05:31.007|10|00:1c:73:31:00:01|Port-Channel5||removed|57
+2026-10-25 13:05:31.009|10|00:1c:73:31:00:01|Port-Channel10|learnedDynamicMac|added|58
+2026-10-25 13:05:53.664|10|00:1c:73:31:00:01|Port-Channel10||removed|61
+2026-10-25 13:05:53.666|10|00:1c:73:31:00:01|Port-Channel5|learnedDynamicMac|added|62</code></pre>
+      <p>Representative output; use host1's real MAC. The columns are time, FID (an internal VLAN ID, usually the VLAN), MAC, interface, type, change and a running counter (p. 151). While leaf1's link was down, host1's traffic arrived through leaf2, so leaf1 pointed the MAC at the MLAG peer link <code>Port-Channel10</code>. That is the same evidence the book uses to show a user moved a server to a different port (p. 152): a timestamped line showing the MAC appear on a new interface. On a hardware switch the type also tells you a static entry (<code>configuredStaticMac</code>) from a learned one.</p>
+    </details>
+    <details class="solution"><summary>Solution · LACP</summary>
+      <pre class="cli"><code>leaf1# show event-monitor lacp
+leaf1# show event-monitor lacp verbose
+leaf1# show event-monitor lacp match-interface e5</code></pre>
+      <p>The plain output is one long pipe-separated row per change and is hard to read. <code>verbose</code> prints columns for port, port-channel, state and a reason, so you can follow Ethernet5 through states such as PortDisabled, LacpDisabled or Expired and back to selected (p. 154). The state names come from the LACP receive and mux state machines; you do not need the IEEE spec, only the order of events and the time they happened.</p>
+    </details>
+    <details class="solution"><summary>Solution · routes and ARP</summary>
+      <pre class="cli"><code>leaf3(config)# interface Loopback0
+leaf3(config-if-Lo0)# shutdown
+leaf3(config-if-Lo0)# no shutdown
+leaf1# show event-monitor route match-ip 10.255.0.5/32
+
+leaf1(config)# ip route 20.20.20.0/24 Null0
+leaf1(config)# no ip route 20.20.20.0/24 Null0
+leaf1# show event-monitor route match-ip 20.20.20.0/24
+
+leaf1# show event-monitor arp group-by ip
+leaf1# show event-monitor arp match-interface e1
+leaf1# bash sqlite3 /var/log/eventMon.db "select * from arp where intf='e1';"
+leaf1# bash sqlite3 /var/log/eventMon.db "select * from arp where intf='Ethernet1';"
+leaf1# bash sqlite3 /var/log/eventMon.db ".schema route"</code></pre>
+      <p>A route "added" row carries a protocol name, and the "removed" row has the extra fields empty (p. 152). The book notes that the metric and preference fields are not reliable, so trust the time, prefix and change columns. The first raw SQL query returns nothing because the database stores the full name <code>Ethernet1</code>; only the CLI expands <code>e1</code> (p. 151). <code>group-by ip</code> keeps the latest row per address, like SQL <code>GROUP BY</code>. The route table has no VRF column, so tenant (VRF TENANT-A) changes may not show up here; check on your release.</p>
+    </details>
+    <details class="solution"><summary>Solution · keep history across reboots</summary>
+      <pre class="cli"><code>leaf1(config)# event-monitor backup path em.log
+leaf1(config)# event-monitor backup max-size 10
+leaf1# dir flash: | include em.log
+! one rotating file per table, for example macem.log.0, routeem.log.0, arpem.log.0
+
+! other settings
+leaf1(config)# event-monitor buffer max-size ?
+leaf1(config)# no event-monitor all
+leaf1(config)# event-monitor route
+leaf1(config)# event-monitor all</code></pre>
+      <p>A plain file name lands on flash, which survives a reboot. A path like <code>/home/admin/em.log</code> is still read as a flash path and ends up as <code>flash:home/admin/em.log</code>; to really write to Linux paths you need the <code>file:</code> prefix, and <code>/home</code> does not survive a reboot anyway (p. 155). Each backup file holds a fixed number of events, then rotates with a new numeric suffix, and the oldest is deleted when the <code>max-size</code> count is reached (default 200 files, p. 155). <code>no event-monitor all</code> turns everything off, <code>event-monitor route</code> turns on one table, and <code>event-monitor all</code> turns them all back on.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> If a task says "find when" or "prove what changed", reach for <code>show event-monitor</code> before the logs. If it prints "not running", enabling it now only records new events, so make the change happen again (flap the link, re-add the route) after you enable it.</aside>
+    <aside class="note real"><strong>Real world.</strong> Leave event monitor on and give it a flash backup path in your base config. The book's point is that it pays off on the day someone insists "nothing changed": a MAC that moved to a different port, or a route that flapped at 2 a.m., is right there with a timestamp (pp. 152, 156). CloudVision keeps the same kind of history fabric-wide, but event monitor works when CloudVision is not there.</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (leaf2): <code>no event-monitor all</code>.</p>
+      <p>Symptom: during an outage review, <code>show event-monitor mac</code> on leaf2 reports that event monitor is not running, and <code>event-monitor sync</code> does not help.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>All event monitor tables were turned off. Fix it with <code>event-monitor all</code> (or <code>event-monitor</code>), add a backup path so the history is kept, and confirm with <code>show event-monitor mac</code> after flapping leaf2 <code>Ethernet5</code>. Events from the period when it was off are gone for good; note that in the incident report.</p>
       </details>
     </div>
   </section>
@@ -1952,6 +2036,7 @@ host$ anta nrfu -u admin -p admin --insecure -i anta-inventory.yml \
       <li>I can configure SNMP v2c with an ACL and SNMPv3 authPriv, and sFlow, and test both from a collector.</li>
       <li>I can mirror a port to the CPU and capture with tcpdump, and explain LANZ and TAP aggregation.</li>
       <li>I can find a failed event handler action from the log and <code>show event-handler</code>, and back up the config on every write.</li>
+      <li>I can enable event monitor, prove a MAC move or route flap with <code>match-mac</code> and <code>match-ip</code>, and keep its history on flash.</li>
       <li>I can read a VXLAN capture and explain an MTU failure with the 50-byte overhead.</li>
       <li>I follow the troubleshooting method and fixed all three tickets with one change each.</li>
       <li>All injected faults and test configs (event handlers on leaf2, mirror sessions, SNMP test changes) are removed or intended, and <code>show running-config diffs</code> shows only what I mean to keep.</li>
@@ -5791,11 +5876,11 @@ leaf1 logger: EVENT-HANDLER BGP-DOWN evidence saved to /mnt/flash/evidence/bgp-2
       <pre class="cli"><code>leaf1# show event-monitor route
 leaf1# show event-monitor mac
 leaf1# show event-monitor arp
-leaf1# show event-monitor sqlite select * from route limit 20;</code></pre>
+leaf1# bash sqlite3 /var/log/eventMon.db "select * from route limit 20;"</code></pre>
       <pre class="out"><code>2026-10-25 10:15:02.118 | 10.255.255.0/31 | ... | removed
 2026-10-25 10:15:03.902 | 8.8.8.0/24       | ... | updated
 2026-10-25 10:16:41.233 | 10.255.255.0/31 | ... | added</code></pre>
-      <p>Event-monitor is on by default and keeps a rolling SQLite log of route, MAC, ARP and other table changes. <code>show event-monitor sqlite</code> takes an SQL query; first run <code>select * from route limit 5;</code> to see the column names on your release, then filter (for example a <code>where</code> clause on the prefix column for 8.8.8.0/24). To keep history across reloads, store the database on flash (<code>event-monitor backup path flash:em.db</code>). Note the VRF: tenant routes live in VRF TENANT-A, so look for entries tagged with that VRF.</p>
+      <p>Event monitor keeps a rolling SQLite log of route, MAC, ARP and other table changes. Since EOS 4.21 it is off by default, so if <code>show event-monitor</code> says it is not running, enable it with <code>event-monitor</code> in config mode (and note that history only starts from then). On current releases the <code>show event-monitor sqlite</code> form no longer works, so query the database from bash (AW Ch 28, p. 150); first run <code>bash sqlite3 /var/log/eventMon.db ".schema route"</code> to see the column names on your release, then filter (for example a <code>where</code> clause on the prefix column for 8.8.8.0/24). To keep history across reloads, store the database on flash (<code>event-monitor backup path em.log</code>). Note the VRF: tenant routes live in VRF TENANT-A, so look for entries tagged with that VRF.</p>
     </details>
     <details class="solution"><summary>Solution · task 3: CLI scheduler</summary>
       <pre class="cli"><code>leaf1(config)# schedule EVPN-SNAP interval 5 max-log-files 24 command show bgp evpn summary
