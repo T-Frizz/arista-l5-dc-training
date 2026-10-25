@@ -31,3 +31,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 52 | FlexRoute | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/52%5B%3Bvnd.vst.idref%3Dchapter-idm45591787817160%5D!/4/2/2%5Bflexroute_idd0037%5D) |
 | 54 | VXLAN | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/54%5B%3Bvnd.vst.idref%3Dchapter-idm45591787816696%5D!/4/2/2%5Bvxlan%5D) |
 | 56 | Email | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/56%5B%3Bvnd.vst.idref%3Dchapter-idm45591787367656%5D!/4/2/2%5Bemail%5D) |
+| 58 | LANZ | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/58%5B%3Bvnd.vst.idref%3Dchapter-idm45591787280968%5D!/4/2/2%5Blanz%5D) |
