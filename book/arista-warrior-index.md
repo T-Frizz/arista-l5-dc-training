@@ -34,3 +34,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 58 | LANZ | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/58%5B%3Bvnd.vst.idref%3Dchapter-idm45591787280968%5D!/4/2/2%5Blanz%5D) |
 | 60 | Scheduler | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/60%5B%3Bvnd.vst.idref%3Dchapter-idm45591787083224%5D!/4/2/2%5Bscheduler%5D) |
 | 62 | tcpdump and Advanced Mirroring | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/62%5B%3Bvnd.vst.idref%3Dchapter-idm45591787081640%5D!/4/2/2%5Btcpdump_and_advanced_mirroring%5D) |
+| 64 | Tap Aggregation | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/64%5B%3Bvnd.vst.idref%3Dchapter-idm45591786736824%5D!/4/2/2%5Btap_aggregation%5D) |
