@@ -23,3 +23,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 36 | Bash | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/36%5B%3Bvnd.vst.idref%3Dchapter-idm45591789861832%5D!/4/2/2%5Bbash_idd0020%5D) |
 | 38 | Zero-Touch Provisioning | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/38%5B%3Bvnd.vst.idref%3Dchapter-idm45591789811160%5D!/4/2/2%5Bzero-touch_provisioning%5D) |
 | 40 | Aboot | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/40%5B%3Bvnd.vst.idref%3Dchapter-idm45591789701256%5D!/4/2/2%5Baboot%5D) |
+| 42 | CloudVision | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/42%5B%3Bvnd.vst.idref%3Dchapter-idm45591789292984%5D!/4/2/2%5Bcloudvision_idd0025%5D) |
