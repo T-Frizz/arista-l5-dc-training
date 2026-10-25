@@ -15,3 +15,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 20 | Merchant Silicon | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/20%5B%3Bvnd.vst.idref%3Dchapter-idm45591791145880%5D!/4/2/2%5Bmerchant_silicon%5D) |
 | 22 | Fabric Speed | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/22%5B%3Bvnd.vst.idref%3Dchapter-idm45591791040040%5D!/4/2/2%5Bfabric_speed%5D) |
 | 24 | Arista Products | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/24%5B%3Bvnd.vst.idref%3Dchapter-idm45591791039256%5D!/4/2/2%5Barista_products%5D) |
+| 26 | SysDB | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D) |
