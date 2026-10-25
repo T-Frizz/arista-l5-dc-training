@@ -17,6 +17,11 @@ Quick start:
 
 ```
 sudo containerlab deploy -t labs/topology/l5dc.clab.yml
+```
+
+On EVE-NG instead of containerlab, follow "Running this lab on EVE-NG" in the guide's Build the lab section (vEOS or cEOS, same configs; vEOS uses Management1).
+
+```
 ssh admin@172.100.100.21          # leaf1, password admin
 pip install pyavd anta && python3 labs/avd/build.py
 ```

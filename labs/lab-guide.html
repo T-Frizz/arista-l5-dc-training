@@ -387,6 +387,38 @@ $ python3 labs/avd/build.py        # writes labs/avd/intended/configs/*.cfg</cod
         </tbody>
       </table></div>
       <p>containerlab also maps <code>eth0</code> to <code>Management0</code> and loads the startup config. The bigger difference is the links. Plain Docker networks are Linux bridges, which swallow link-local multicast such as LLDP and LACP frames, and when a container joins more than three networks the order of its interfaces is not guaranteed (p. 177). containerlab wires each link as a direct veth pair, so <code>Ethernet1</code> is always the link you drew and LLDP, LACP and MLAG work. That is why this lab uses containerlab rather than hand-made Docker networks. Lab D1 has an <a href="#lab-d1-containers">optional drill</a> that shows the bridge problem.</p>
+      <h3 id="setup-eveng">Running this lab on EVE-NG</h3>
+      <p>The lab is defined for containerlab, but nothing in it depends on containerlab. On EVE-NG you build the same nine nodes and twenty links by hand once, then use the same startup configs, AVD inputs, ANTA catalogs and fault script. Two choices to make first:</p>
+      <ul>
+        <li><strong>vEOS-lab (QEMU)</strong> works on every EVE-NG edition. It boots like a real switch (Aboot, <code>boot system</code>, reloads), so the Lab D1 upgrade and Aboot recovery tasks work for real, which cEOS cannot do. Each node needs about 2 GB of RAM (4 GB is more comfortable with EVPN) and 1 to 2 vCPUs, so plan for 20 to 36 GB for all nine. vEOS is the same EOS code built as a VM; anything that needs a switching ASIC (LANZ, TAP aggregation, hardware counters) is missing, but everything in software works, including MLAG, LLDP, ZTP, eAPI, Event Manager and event monitor (<a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/76%5B%3Bvnd.vst.idref%3Dchapter-idm45591785360776%5D!/4/2/2%5Bveos_idd0052%5D" target="_blank" rel="noopener">AW Ch 32 · vEOS</a>, p. 181).</li>
+        <li><strong>cEOS</strong> needs Docker node support in your EVE-NG edition (check your version's documentation). It uses much less RAM, keeps <code>Management0</code>, and matches the guide exactly.</li>
+      </ul>
+      <ol class="tasks">
+        <li><p>Install the vEOS image (64-bit combined image, so no separate Aboot ISO is needed), then fix permissions:</p>
+          <pre class="cli"><code>root@eve:~# mkdir -p /opt/unetlab/addons/qemu/veos-4.34.2F
+root@eve:~# cp vEOS64-lab-4.34.2F.qcow2 /opt/unetlab/addons/qemu/veos-4.34.2F/hda.qcow2
+root@eve:~# /opt/unetlab/wrappers/unl_wrapper -a fixpermissions</code></pre>
+          <p>The folder name must start with <code>veos-</code> so EVE-NG uses its vEOS template.</p></li>
+        <li><p>Add the nine nodes with the names in the table below. In EVE-NG's vEOS template the first port (<code>eth0</code> / <code>Mgmt1</code>) is <code>Management1</code> and port <code>ethN</code> is <code>EthernetN</code>, the same numbering containerlab uses.</p></li>
+        <li><p>Draw the links:</p>
+          <div class="table-wrap"><table class="grid">
+            <thead><tr><th>Purpose</th><th>Links (A side to B side)</th></tr></thead>
+            <tbody>
+              <tr><td>Leaf uplinks</td><td>leaf1 Eth1-spine1 Eth1, leaf1 Eth2-spine2 Eth1, leaf2 Eth1-spine1 Eth2, leaf2 Eth2-spine2 Eth2, leaf3 Eth1-spine1 Eth3, leaf3 Eth2-spine2 Eth3, leaf4 Eth1-spine1 Eth4, leaf4 Eth2-spine2 Eth4</td></tr>
+              <tr><td>MLAG peer links</td><td>leaf1 Eth3-leaf2 Eth3, leaf1 Eth4-leaf2 Eth4, leaf3 Eth3-leaf4 Eth3, leaf3 Eth4-leaf4 Eth4, spine1 Eth5-spine2 Eth5, spine1 Eth6-spine2 Eth6 (the spine pair is only used in the L2LS stage of Lab D4)</td></tr>
+              <tr><td>Hosts</td><td>host1 Eth1-leaf1 Eth5, host1 Eth2-leaf2 Eth5, host2 Eth1-leaf3 Eth5, host2 Eth2-leaf4 Eth5</td></tr>
+              <tr><td>Border</td><td>core1 Eth1-leaf3 Eth6, core1 Eth2-leaf4 Eth6</td></tr>
+            </tbody>
+          </table></div></li>
+        <li><p>Management: connect every node's first port to one EVE-NG network bridged to the segment your Ubuntu automation server is on (a <code>Cloud</code> / <code>pnet</code> network). Easiest is to keep the lab's 172.100.100.0/24 addresses and add one address from that range to the automation server (<code>sudo ip addr add 172.100.100.5/24 dev &lt;nic&gt;</code>; use <code>netplan</code> to make it permanent). If you re-address instead, change the IPs in <code>labs/topology/startup/*.cfg</code>, <code>labs/avd/inventory.yml</code>, <code>labs/avd/anta-inventory.yml</code> and <code>mgmt_gateway</code> in <code>labs/avd/group_vars/L5DC.yml</code>.</p></li>
+        <li><p>vEOS only: rename the management interface in the configs, then rebuild the AVD output. Wherever this guide says <code>Management0</code>, read <code>Management1</code>.</p>
+          <pre class="cli"><code>$ cd arista-l5-dc-training/labs
+$ sed -i 's/Management0/Management1/g' topology/startup/*.cfg avd/group_vars/L5DC.yml avd/group_vars/L5DC_FABRIC.yml
+$ python3 avd/build.py</code></pre></li>
+        <li><p>First boot: vEOS starts in Zero Touch Provisioning. On each console, log in as <code>admin</code> with no password, run <code>zerotouch cancel</code> (the node reloads), then log in again, enter <code>configure</code>, paste that node's file from <code>labs/topology/startup/</code>, and <code>write memory</code>. After that you can reach every node over SSH and eAPI and never need the console again.</p></li>
+        <li><p>Check the links with <code>show lldp neighbors</code> on leaf1: you should see spine1, spine2, leaf2 and host1. If LLDP is empty, LACP and MLAG will also fail; EVE-NG's bridges normally pass these frames, so check your EVE-NG version notes.</p></li>
+      </ol>
+      <p>Everything else in the guide stays the same, with two swaps. Where a command uses <code>docker exec clab-l5dc-&lt;node&gt; Cli</code>, use SSH or the EVE-NG console. Run the fault script with <code>MODE=eapi labs/capstone/inject-faults.sh ...</code>. To reset a node, copy the AVD config over with <code>scp</code> and run <code>configure replace flash:target.cfg</code>, or wipe the node in EVE-NG and repeat the first-boot step. If the first <code>configure replace</code> to the AVD config says the routing protocol model change needs a reload, run <code>write memory</code> and <code>reload</code> once.</p>
       <h3>Reset or skip ahead</h3>
       <p>Two configs act as save points. The day-0 configs are in <code>labs/topology/startup/</code>. The finished EVPN fabric that AVD generates is in <code>labs/avd/intended/configs/</code>. Copy either onto a switch and replace the running config in one step.</p>
       <pre class="cli"><code>$ docker cp labs/avd/intended/configs/leaf1.cfg clab-l5dc-leaf1:/mnt/flash/target.cfg
@@ -924,7 +956,7 @@ leaf1# delete flash:EOS-4.34.3M.swi</code></pre>
   </section>
 
   <section class="part" id="lab-d1-containers">
-    <h3>Containers: EOS in a container, containers in EOS (optional)</h3>
+    <h3>Containers and VMs: EOS as a guest, guests on EOS (optional)</h3>
     <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D" target="_blank" rel="noopener">AW Ch 31 · Containers</a> (pp. 175-180). It is real-world material and not an exam objective, but you already depend on it: every switch in this lab is a container.</p>
     <aside class="note"><strong>Key ideas from the chapter.</strong> A container shares the host's kernel instead of emulating hardware like a VM, so it is small and starts almost instantly (p. 175). EOS and containers meet in two ways. <em>EOS in a container</em> (cEOS) lets EOS run on hardware Arista did not build, and lets large operators manage switch software with the same orchestration tools they use for every other container (p. 175). <em>Containers in EOS</em>: EOS includes Docker, managed from the CLI by <code>container-manager</code> so it fits normal switch workflows and CloudVision (pp. 177-178). An <em>image</em> is the package; a <em>container</em> is a running copy of it, and each <code>docker run</code> makes a new container with a random name (p. 179). A container stops as soon as its main command ends, so a container that only runs <code>/bin/bash</code> with no terminal exits at once (p. 178).</aside>
 
@@ -987,6 +1019,34 @@ switch# container-manager backup container Ubuntu
 switch# show container-manager backup
 switch# container-manager backup remove Ubuntu</code></pre>
       <p>cEOS does not run Docker inside itself, so expect most of these commands to be missing or to fail in this lab. Check <code>show container-manager ?</code> on your platform; availability and syntax depend on the hardware and EOS release. The first container exited because its command, <code>/bin/bash</code> with no terminal, finished straight away; a long-running command such as <code>sleep</code> or a real service keeps it up (pp. 178-179). Everything outside <code>flash:</code> and <code>drive:</code> is lost on reload, containers included. With <code>on-boot</code>, EOS rebuilds the container at boot by pulling the image again, which needs internet access (p. 179). <code>container-manager backup</code> saves the image to <code>/mnt/flash/.containermgr/</code> so boot uses the local copy, but a single small Ubuntu image is about 90 MB of flash (pp. 179-180). <code>sudo docker run</code> from bash works too, but each run creates another unmanaged container; managing containers through <code>container-manager</code> keeps them in the config where CloudVision can see them (p. 178).</p>
+    </details>
+    <h4>vEOS, and VMs on the switch</h4>
+    <aside class="note"><strong>Key ideas from <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/76%5B%3Bvnd.vst.idref%3Dchapter-idm45591785360776%5D!/4/2/2%5Bveos_idd0052%5D" target="_blank" rel="noopener">AW Ch 32 · vEOS</a>.</strong> vEOS is EOS compiled as a VM, not a separate product, which is why a config tested on vEOS behaves the same on a switch. Only ASIC-dependent features are missing (p. 181). The book describes two versions: vEOS-lab, free for labs, and vEOS-router, a licensed build for AWS, Azure and GCP with faster forwarding plus VPN and IPsec (p. 181). Arista now sells the cloud version as CloudEOS. EOS can also run VMs itself with the <code>virtual-machine</code> commands (p. 184). The book does this for fun and is clear about the risk: a VM takes RAM and flash from the switch, and running out of memory is one of the worst things that can happen to a switch (pp. 184-187).</aside>
+    <details class="solution"><summary>Reference · a VM on an EOS switch (hardware only)</summary>
+      <pre class="cli"><code>switch(config)# vlan 101
+switch(config)# interface Vlan101
+switch(config)# virtual-machine LABVM
+switch(config-vm-LABVM)# disk-image flash:vEOS-lab-copy1.vmdk
+switch(config-vm-LABVM)# memory-size 2047
+switch(config-vm-LABVM)# virtual-nic 1 Management1
+switch(config-vm-LABVM)# virtual-nic 2 Vlan101
+switch(config-vm-LABVM)# enable
+switch# show virtual-machine
+switch# show virtual-machine detail
+switch# virtual-machine LABVM console
+! stop it and free the RAM
+switch(config)# virtual-machine LABVM
+switch(config-vm-LABVM)# no enable</code></pre>
+      <p>What the chapter found, in short (pp. 184-187):</p>
+      <ul>
+        <li>The default VM memory is tiny (128 MB) and the book's release capped it at 2047 MB. Two such VMs used 4 GB, which is all the RAM many switches have.</li>
+        <li>Each VM needs its own copy of the disk image, about 700 MB of flash each. Use a switch with an SSD if you do this at all.</li>
+        <li>A <code>virtual-nic</code> can attach only to <code>Management1</code> or to an SVI, and the SVI must exist first.</li>
+        <li>Inside the vEOS guest, the IP address also had to be set on the matching <code>vmnicet</code> bridge interface in bash before traffic flowed.</li>
+        <li>The guests could reach each other and other devices, but not the host switch's own addresses.</li>
+        <li>An enabled VM in a saved config starts again at boot. <code>Ctrl-C</code> drops you out of the VM console, so leave configuration mode another way. A vEOS guest cannot run VMs of its own.</li>
+      </ul>
+      <p>cEOS and vEOS do not support <code>virtual-machine</code>, so this is reading only. In practice, run VMs on servers and keep switch resources for the switch.</p>
     </details>
     <aside class="note real"><strong>Real world.</strong> The most valuable container use case for most teams is the digital twin: test every change on a cEOS copy of the fabric before it reaches production. This lab already has every piece: the containerlab topology, the AVD build and the ANTA catalogs. Running containers on production switches is rarer. Do it only when there is truly no server nearby, cap the resources, and treat the image like any other software you must patch.</aside>
   </section>
@@ -4542,6 +4602,22 @@ $ curl -sk -u admin:admin https://172.100.100.21/command-api \
     <p class="fine">Outputs are representative and trimmed; your timers, MACs and counters will differ.</p>
     <pre class="out"><code>{"jsonrpc": "2.0", "id": 1, "result": [{"fqdn": "leaf1", "hostname": "leaf1"}]}</code></pre>
     <p>If that answer comes back, eAPI works and you are ready. The day-0 startup configs enable <code>management api http-commands</code> (HTTPS) and <code>management api gnmi</code> on every node, so you never need the console after the first boot.</p>
+    <h4 id="lab-d7-ansible">From an Ubuntu automation server with Ansible</h4>
+    <p>If you already run Ansible from a separate Ubuntu server (for example next to EVE-NG), run Lab D7 from there. The repository's AVD inventory already sets the eAPI connection (<code>ansible.netcommon.httpapi</code>, HTTPS, <code>enable</code> as become), so you only need the collections and a route to the management network.</p>
+    <pre class="cli"><code>$ python3 -m venv ~/l5dc &amp;&amp; source ~/l5dc/bin/activate
+$ pip install ansible-core "pyavd==6.4.*" "anta==1.10.*" pyeapi requests
+$ ansible-galaxy collection install "arista.avd:&gt;=6.4.0,&lt;6.5.0" arista.eos ansible.netcommon
+$ git clone https://github.com/T-Frizz/arista-l5-dc-training.git &amp;&amp; cd arista-l5-dc-training/labs/avd
+
+# reachability and a first eAPI call through Ansible
+$ ansible -i inventory.yml L5DC_FABRIC -m arista.eos.eos_command -a "commands='show version'"
+
+# the AVD workflow: build, dry run, deploy, validate
+$ ansible-playbook -i inventory.yml playbooks/build.yml
+$ ansible-playbook -i inventory.yml playbooks/deploy.yml --check --diff
+$ ansible-playbook -i inventory.yml playbooks/deploy.yml
+$ ansible-playbook -i inventory.yml playbooks/validate.yml</code></pre>
+    <p>Keep the <code>arista.avd</code> collection on the same release line as <code>pyavd</code>; the collection uses pyavd internally and refuses to run with a mismatched version. <code>arista.eos</code> modules such as <code>eos_command</code>, <code>eos_config</code> and <code>eos_facts</code> are handy for one-off tasks, but in this lab make lasting changes through the AVD data model, as objective 7.3 does. The Python scripts in this lab (eAPI, pyeapi, ANTA) run unchanged from the same server.</p>
   </section>
 
   <section class="part" id="obj-7-1">
