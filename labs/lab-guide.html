@@ -1631,6 +1631,14 @@ tapagg# show tap aggregation groups</code></pre>
 
     <aside class="note exam"><strong>Exam tip.</strong> SNMPv3 has three parts that must agree: the view, the group's security level (<code>noauth</code>, <code>auth</code>, <code>priv</code>), and the user's auth/priv settings. When a v3 walk fails, compare <code>show snmp group</code> and <code>show snmp user</code> with the security level the client asks for (<code>-l authPriv</code>).</aside>
     <aside class="note real"><strong>Real world.</strong> sFlow sampling at 1:16384 is enough to see top talkers on 10G and above without loading the CPU. For the full stream use mirroring or a TAP aggregation layer; for congestion use LANZ; for state and counters use streaming telemetry. SNMP survives mainly for legacy NMS and inventory.</aside>
+    <aside class="note real" id="tapagg-sidebar"><strong>Real world (optional, not on the lab exam): Tap Aggregation.</strong> Background from <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/64%5B%3Bvnd.vst.idref%3Dchapter-idm45591786736824%5D!/4/2/2%5Btap_aggregation%5D" target="_blank" rel="noopener">AW Ch 26 · Tap Aggregation</a> (pp. 140-142). A tap aggregation switch is a packet broker: feeds from optical taps and SPAN ports come in on <em>tap</em> ports and leave on <em>tool</em> ports toward analyzers and recorders. Key points to remember:
+      <ul>
+        <li><strong>Exclusive mode</strong> turns the whole switch into a tap aggregator and stops normal switching, so it belongs on a dedicated box, never on a production leaf. <strong>Mixed mode</strong> (on platforms that support it) lets some ports do tap aggregation while the rest keep switching.</li>
+        <li>Tap and tool ports do not take part in normal L2 control protocols: STP and LLDP are not run on them, because they only receive or only send copies of traffic.</li>
+        <li>Traffic is steered with <strong>aggregation groups</strong>. A tap port feeds one default group; a tool port can belong to many groups. Build the tool port's list with <code>switchport tool group set</code>, then change it with <code>switchport tool group add</code> or <code>remove</code> (<code>set</code> replaces the whole list, a classic mistake).</li>
+        <li>Arista also offers a TapAgg web GUI and CloudVision views to manage the groups, which is how most operations teams drive it day to day.</li>
+      </ul>
+      <p>cEOS cannot run tap aggregation, so the hands-on part for this objective is the mirror-to-CPU drill above (<code>monitor session ... destination Cpu</code>, then <code>bash sudo tcpdump -ni mirror0</code>). That is the skill you will actually use to prove what is on the wire.</p></aside>
 
     <div class="breakfix"><p class="label">Break / fix</p>
       <p>Inject (leaf1): <code>no snmp-server group NETOPS v3 priv read ALL notify ALL</code>, then <code>snmp-server group NETOPS v3 auth read ALL</code>.</p>
