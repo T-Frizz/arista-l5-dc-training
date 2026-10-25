@@ -1175,7 +1175,7 @@ interface Loopback0
     <div class="body">
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
-          <li>VTEP = the <code>Vxlan1</code> interface, sourced from a loopback. UDP port 4789. The VNI is 24 bits (about 16.7 million segments) against 12 bits for a VLAN, so different tenants can reuse a VLAN number on different VNIs. <span class="pg">AW 21 p.110, 113</span></li>
+          <li>VTEP = the <code>Vxlan1</code> interface, sourced from a loopback. UDP port 4789. The VNI is 24 bits (about 16.7 million segments) against 12 bits for a VLAN, so different tenants can reuse a VLAN number on different VNIs. <span class="pg">AW 21 p.110–111, 113</span></li>
           <li>VXLAN is stateless encapsulation, not a tunnel that comes "up": a VTEP wraps the frame in UDP/IP and sends it to the remote VTEP's IP. Nothing is up or down until traffic flows. <span class="pg">AW 21 p.112</span></li>
           <li>L2 VNI maps a VLAN to a VNI (bridging). L3 VNI maps a VRF to a VNI (routing between VTEPs in symmetric IRB).</li>
           <li>BUM (broadcast, unknown unicast, multicast) handling: <b>HER</b> sends a copy to each VTEP in the flood list. The control plane decides how that list is built: manual, CVX, or EVPN type-3 routes. A multicast underlay is the other option, but VXLAN with MLAG and VXLAN routing need HER or EVPN. <span class="pg">AW 21 p.112–114</span></li>
@@ -1217,7 +1217,7 @@ interface Loopback0
       </div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 21, VXLAN: notes by page</h4><ul>
-          <li><b>p.110</b> Terms: VXLAN segment (an L2 overlay network), VNI (its 24-bit ID), VTEP (the device that encapsulates and decapsulates), VXLAN gateway (a hardware VTEP for devices that can't speak VXLAN), underlay (the routed network) and overlay (the L2 segments on top). Arista's VXLAN is done in hardware, so not every platform or virtual EOS supports the data plane.</li>
+          <li><b>p.110–111</b> Terms: VXLAN segment (an L2 overlay network), VNI (its 24-bit ID), VTEP (the device that encapsulates and decapsulates), VXLAN gateway (a hardware VTEP for devices that can't speak VXLAN), underlay (the routed network) and overlay (the L2 segments on top). Arista's VXLAN is done in hardware, so not every platform or virtual EOS supports the data plane.</li>
           <li><b>p.112</b> Think of each VTEP as a port on one big switch whose fabric is the L3 network: unknown destinations are flooded to every VTEP in the segment, replies are unicast, and VTEPs learn which MAC sits behind which VTEP, just like a switch's MAC table.</li>
           <li><b>p.113</b> HER: the ingress VTEP copies each BUM frame to every VTEP in the flood list. A good VNI plan encodes meaning, for example tenant digits plus the VLAN.</li>
           <li><b>p.114</b> Three ways to run the control plane: manual flood lists, CVX, or a routing protocol (EVPN). Manual config: Vxlan1 source interface on a loopback, VLAN-to-VNI maps, flood lists. The <code>add</code> keyword appends a VTEP; leaving it out overwrites.</li>
