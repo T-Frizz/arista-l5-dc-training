@@ -303,7 +303,80 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
 <!-- ============ F HARDWARE ============ -->
 <section class="block" id="hw">
   <h2>Hardware foundations: fabric speed, oversubscription and the product line</h2>
-  <p class="note">Background for D4/D5 design questions and for reading datasheets in the real world. Not hands-on exam tasks. Based on Arista Warrior ch. 5, "Fabric Speed" (pp.26–27), and ch. 6, "Arista Products" (pp.28, 30–33), with added design math.</p>
+  <p class="note">Background for D4/D5 design questions and for reading datasheets in the real world. Not hands-on exam tasks. Based on Arista Warrior ch. 2, "Network Designs" (pp.16–17), ch. 3, "Buffers" (pp.18–21), ch. 5, "Fabric Speed" (pp.26–27), and ch. 6, "Arista Products" (pp.28, 30–33), with added design math.</p>
+
+  <h3>Network designs</h3>
+  <div class="cols">
+    <div class="part"><h4>Know</h4><ul>
+      <li><b>Why the old design went:</b> core–distribution–access (three-tier) was built for north–south traffic (in and out of the data center). Modern traffic is mostly east–west, server to server, and faster cheaper hardware lets the design be simpler. These are starting points, not rules. <span class="pg">AW 2 p.16</span></li>
+      <li><b>Bow-tie MLAG:</b> an L2 design with two MLAG pairs joined by one big port-channel (four links in a square-with-an-X). No blocked links, no STP loops to manage. It's the 4.1 L2LS pair-to-pair building block (Cisco's version is vPC). <span class="pg">AW 2 p.16</span></li>
+      <li><b>Leaf-spine (Clos):</b> every leaf (top-of-rack) connects to every spine, and leaves never connect to each other, so any rack is the same distance (leaf–spine–leaf) from any other, and losing a spine only removes some paths. Based on Charles Clos's 1950s telephone switching networks, also used inside ASICs and InfiniBand. <span class="pg">AW 2 p.16</span></li>
+      <li><b>L3, not L2, between leaf and spine:</b> "switch when you can, route when you have to" no longer applies, because routing is now done in ASIC hardware at wire speed. Use OSPF, IS-IS or (usually) BGP with <b>ECMP</b> so all uplinks carry traffic. Older L2 fabrics (TRILL) lost out. <span class="pg">AW 2 p.16</span></li>
+      <li><b>Spine width</b> is limited by ECMP and ports: the book's 7500R supports 128-way ECMP, so in theory 128 spines. Spines used to be big chassis; today they're often 32-port 100G fixed switches. In MLAG designs "spine" just means the top layer and "leaf" the bottom. <span class="pg">AW 2 p.16</span></li>
+      <li><b>Spline:</b> a collapsed leaf-spine: one or two switches that every server plugs into, acting as both leaf and spine (like end-of-row). Suits enterprise or smaller sites where a full leaf-spine isn't worth it. <span class="pg">AW 2 p.17</span></li>
+      <li><b>VXLAN overlay:</b> L2 segments tunneled over the routed leaf-spine underlay (D6, ch. 21). Now used within rows, between data centers and even over the internet. <span class="pg">AW 2 p.17</span></li>
+      <li><b>Universal spine:</b> a spine layer of chassis switches joining several different designs (a leaf-spine, a bow-tie, a spline, a VXLAN pod) and the outside world or public clouds. <span class="pg">AW 2 p.17</span></li>
+      <li><b>AnyCloud</b> (now CloudEOS): vEOS-Router in AWS or Azure linked back over VPN, for a hybrid cloud managed from CloudVision. <span class="pg">AW 2 p.17</span></li>
+    </ul></div>
+    <div class="part"><h4>Which design, and where it shows up in this guide</h4>
+    <div class="tbl"><table>
+      <thead><tr><th>Design</th><th>Fits</th><th>Guide</th></tr></thead>
+      <tbody>
+        <tr><td>Bow-tie MLAG / L2LS</td><td>Small L2 pods, migrations from three-tier</td><td>4.1</td></tr>
+        <tr><td>L3 leaf-spine (L3LS)</td><td>Most data centers; scale by adding spines/leaves</td><td>4.2, D5</td></tr>
+        <tr><td>L3LS + VXLAN/EVPN</td><td>L2 stretch and multi-tenancy over L3</td><td>D6</td></tr>
+        <tr><td>Spline</td><td>One or two racks, branch DCs</td><td>4.1 (one MLAG pair)</td></tr>
+        <tr><td>Universal spine / super-spine</td><td>Many pods or halls, a DCI or cloud edge</td><td>4.2 (5-stage Clos)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Hop count: in a leaf-spine, traffic between racks crosses one spine (leaf, spine, leaf), whichever racks they are. That predictability, and ECMP across every spine, is why the exam designs use it.</p></div>
+  </div>
+
+  <h3>Buffers</h3>
+  <div class="cols">
+    <div class="part"><h4>Know</h4><ul>
+      <li><b>The fabric as a grid:</b> draw ingress ports down one side and egress ports across the top; each crossing point is a possible path. Full duplex means e1→e2 and e2→e1 happen together. The fabric can carry several conversations at once only if they use different output ports. <span class="pg">AW 3 p.18</span></li>
+      <li><b>Output contention:</b> if e3 sends to e2 while e1 is already sending to e2, the two collide at e2's output. Without buffering, e3's packets drop. That's why Ethernet switches need buffers. <span class="pg">AW 3 p.18–19</span></li>
+      <li><b>Input buffers</b> hold packets until the output is free, but they fill too, and then either the newest or the oldest packets drop. Buffering adds latency: fine for TCP bulk transfers, bad for VoIP and high-frequency trading. Bigger buffers aren't always better. <span class="pg">AW 3 p.19</span></li>
+      <li><b>Microbursts:</b> traffic is bursty (many servers to one NAS). A burst lasting milliseconds is invisible in 1- or 5-minute averages: in the book's example, 1-minute polls show spikes about 50× the trend while 5-minute polls look flat. Example: 10 servers each sending 5G to a NAS on a 10G port: 10G goes out and 40G must be queued or dropped. LANZ (3.3) is the tool that sees this. <span class="pg">AW 3 p.19–20</span></li>
+      <li><b>Output buffers</b> hold packets when the device on the egress port can't take them fast enough. Deciding what crosses the fabric when is <b>arbitration</b>, done by the ASIC and generally not user-configurable. <span class="pg">AW 3 p.20</span></li>
+      <li><b>Blocking:</b> a switch blocks when its fabric can't carry every port at line rate (oversubscription). Watch spec sheets: a "480G fabric" for 48 × 10G ports is only nonblocking if 480G is per direction (see Fabric speed below). <span class="pg">AW 3 p.20</span></li>
+      <li><b>Head-of-line (HOL) blocking:</b> with one FIFO input queue per port, a packet waiting for a busy output holds up everything behind it, even packets for idle outputs. <span class="pg">AW 3 p.20–21</span></li>
+      <li><b>Virtual output queues (VOQ):</b> each input keeps a separate queue per output, so one full output only holds its own queue. Jericho-class Arista switches (7280R, 7500R) use VOQs with deep buffers; queues are allocated dynamically rather than one per possible output, which wouldn't scale. <span class="pg">AW 3 p.21</span></li>
+      <li><b>Buffer bloat</b> is real where a fast link meets a slow one (10G from a content provider into a 50 Mbps home link): a big buffer there holds seconds of traffic and confuses TCP. Inside a data center, where speeds are similar and bursts are short, deep buffers help. <span class="pg">AW 3 p.21</span></li>
+    </ul></div>
+    <div class="part"><h4>Buffer math and where it matters</h4>
+<pre>Drain time = buffer size ÷ link speed
+24 MB = 192 Mb
+  at 10 Gbps  →  ~19 ms
+  at 50 Mbps  →  ~3.8 s   (buffer bloat)
+
+Incast: 10 senders × 5G → one 10G port
+  in 50G, out 10G → 40G/s to queue
+  a 32 MB buffer fills in ~6 ms
+
+Shallow vs deep (rule of thumb)
+  Trident/Tomahawk (7050X, 7060X)
+    tens of MB, shared, low latency
+  Jericho (7280R, 7500R)
+    GBs (HBM), VOQ, absorbs incast</pre>
+    <ul>
+      <li><b>Use deep buffers</b> for storage, big-data shuffle, AI/ML collectives and speed changes (100G to 25G hosts, DCI). <b>Shallow</b> is fine for low-latency, evenly loaded leaf-spine traffic.</li>
+      <li><b>Watch for drops</b> with <code>show interfaces counters discards</code>, <code>show queue-monitor length</code> (LANZ, 3.3) and CloudVision's discard layer, not 5-minute SNMP graphs.</li>
+    </ul></div>
+  </div>
+  <div class="book-notes">
+    <div class="part"><h4>Arista Warrior ch. 2, Network Designs: notes by page</h4><ul>
+      <li><b>p.16</b> Arista promoted new designs for the cloud giants that smaller networks have since adopted. Three-tier came from an era of north–south traffic and expensive routers. Bow-tie MLAG: two MLAG pairs joined together (the author dislikes the name). Leaf-spine: Clos principles (1950s), Arista popularised the leaf/spine terms around 2008; leaves are ToR switches, one hop via any spine to any other leaf, and the fabric survives spine failures. Built with L3 (OSPF, IS-IS, usually BGP) and ECMP; routing in ASIC hardware made L2 fabrics like TRILL unnecessary. The 7500R does 128-way ECMP, and a 16-slot 7500R has 2,304 10G ports.</li>
+      <li><b>p.17</b> Spline: spine and leaf collapsed into the switches the servers plug into, mostly for enterprise. VXLAN overlay: L2 tunnels over an L3 leaf-spine underlay, now common within rows, between DCs and over the internet. Universal spine: chassis spines joining a mix of designs, plus connections to AWS, Azure and others. AnyCloud: vEOS-Router plus VPN for a hybrid cloud, managed from CloudVision.</li>
+    </ul></div>
+    <div class="part"><h4>Arista Warrior ch. 3, Buffers: notes by page</h4><ul>
+      <li><b>p.18</b> Vendors argue about buffers with half-truths. Model a switch fabric as a grid of ingress and egress ports (the same port appears on both sides). Several conversations can cross the fabric at once if their ports don't overlap. If e3 sends to e2 while e1 is using it, that's a collision at the output, and the packet drops.</li>
+      <li><b>p.19</b> Input buffers let the switch hold e3's packets until e2 is free. But buffers fill and drop, and they add latency; drops are OK for retransmitting protocols, bad for UDP/RTP voice, and for trading, waiting is as bad as losing. Traffic is bursty: 100 servers talking to one NAS can spike suddenly. A microburst doesn't show in five-minute averages.</li>
+      <li><b>p.20</b> The 1-minute vs 5-minute polling graphs: same traffic, one shows spikes about 50× normal, the other a steady ~120 kbps trend. Perception isn't reality. If 10 servers push 5G each at a NAS on a 10G port, 40G must be queued. Output buffers hold packets the attached device can't accept fast enough. Arbitration (deciding what crosses when) is done in the ASIC. Terms: FIFO, blocking (a 48 × 10G switch needs 480G each way to be nonblocking; check whether the spec counts both directions), head-of-line blocking.</li>
+      <li><b>p.21</b> HOL blocking: a packet stuck at the head of a FIFO input queue holds up the rest (the car waiting to turn left). VOQ gives each input a queue per output, like adding a turn lane; VOQs are allocated dynamically because one per possible output doesn't scale. Buffer bloat matters on slow links (10G into a 50 Mbps home link, where a cable modem's buffer holds seconds), not in the data center. Deep buffers, a nonblocking fabric (ch. 5) and features (ch. 6) are Arista's pitch.</li>
+    </ul></div>
+  </div>
 
   <h3>Fabric speed and nonblocking</h3>
   <div class="cols">
@@ -419,6 +492,8 @@ show interfaces counters rates  ! uplink balance</pre></div>
   </div>
 
   <div class="practice"><h3>Practice: hardware</h3>
+    <details class="q"><summary>A storage team's 5-minute graphs show 30% load on a 10G NAS port, but backups see TCP retransmits. What's going on, and how do you prove it?</summary><div class="a"><p>Microbursts: many clients hit the NAS at once, the output buffer overflows for milliseconds, and the average hides it. Check output discards on that port and enable LANZ (3.3) to record queue depth. Fixes: a deeper-buffer switch for storage, or more bandwidth to the NAS.</p></div></details>
+    <details class="q"><summary>What is head-of-line blocking, and how do VOQs fix it?</summary><div class="a"><p>With one FIFO input queue, a packet waiting for a busy output blocks the packets behind it that are headed to free outputs. VOQs keep a separate queue per output on the input side, so only traffic for the congested port waits.</p></div></details>
     <details class="q"><summary>A 24 × 10G switch advertises a 240 Gbps fabric. Is it nonblocking?</summary><div class="a"><p>Not if 240G is the total for both directions: nonblocking needs 24 × 10G × 2 = 480G. Unless the vendor says 240G is per direction, it's 2:1.</p></div></details>
     <details class="q"><summary>Leaves have 48 × 25G server ports and 6 × 100G uplinks to 6 spines. What's the oversubscription ratio, and what's the ECMP setting?</summary><div class="a"><p>1200G ÷ 600G = 2:1. Six equal-cost paths, so <code>maximum-paths 6 ecmp 6</code> (or more).</p></div></details>
     <details class="q"><summary>A new switch arrives with blue-handled fans and PSUs for a rack with front-to-back airflow. Problem?</summary><div class="a"><p>Yes. Blue is back-to-front, so it would breathe hot-aisle air. Order red (front-to-back, <code>-F</code>) units, and never mix colors in one switch.</p></div></details>
@@ -920,6 +995,10 @@ bash cd /mnt/flash; vi boot-extensions</pre></div>
           <li>Devices stream state to CloudVision through the TerminAttr agent over gRPC. Provisioning uses eAPI or gNMI back to the device.</li>
           <li>Onboarding: install TerminAttr, configure it with the CV address, auth token and VRF, then the device appears in Inventory.</li>
           <li>Admin tasks: backup and restore (<code>cvpi backup</code>), upgrades, licensing, user roles and service accounts.</li>
+          <li><b>CVP vs CVX:</b> CVP is the web platform (config management, change control, telemetry, compliance). CVX is a vEOS VM with more CPU and memory acting as a controller, mainly for the VXLAN control service (6.1). Bug and compliance checks used to need CVX; they moved into CVP in early 2019. <span class="pg">AW 15 p.68, 70</span></li>
+          <li><b>CVP isn't an SNMP poller.</b> It doesn't poll every few minutes; TerminAttr streams SysDB changes as they happen, so graphs and events are live and keep history. <span class="pg">AW 15 p.69, 74</span></li>
+          <li><b>How it changes config:</b> through eAPI using EOS config sessions (1.1), not by screen-scraping SSH. That's why pushes are atomic and rollback is reliable. Devices you add by hand need eAPI on; ZTP-onboarded devices get it automatically. <span class="pg">AW 15 p.69, 73</span></li>
+          <li><b>AAA matters:</b> the user logged into CVP is the user that makes the change on the switch, so set up TACACS+/RADIUS and you get per-person accounting. <span class="pg">AW 15 p.68</span></li>
         </ul></div>
         <div class="part"><h4>Configure</h4>
 <pre><span class="k">daemon TerminAttr</span>
@@ -947,7 +1026,23 @@ management api http-commands
           <li>Wrong VRF in <code>-cvvrf</code>; TerminAttr can't reach CV over the default VRF.</li>
           <li>Token file missing or expired. Onboarding tokens are time-limited.</li>
           <li>Clock skew breaks TLS. Configure NTP first.</li>
+          <li>A manually added device that never provisions: eAPI (<code>management api http-commands</code>) is off or in the wrong VRF. <span class="pg">AW 15 p.69</span></li>
+          <li>Old EOS under a new CVP: each CVP release has a minimum EOS (the book's CVP needed 4.17+). Check the release notes before onboarding. <span class="pg">AW 15 p.68</span></li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 15, CloudVision: notes by page (covers 2.1, 2.2 and 3.2)</h4><ul>
+          <li><b>p.68</b> CloudVision is a product family. CVX = vEOS on a server with more resources, used as a controller (e.g., VTEP flood lists, ch. 21). CVP = the web GUI, run as one server or a cluster, or bought as an appliance. Quick facts from the book's 2018.2.2 release: a large install image (over 6 GB); a VM needs about 16 cores, 22 GB RAM (up to 250 devices) and 1 TB disk; don't vMotion a CVP cluster; each CVP release has a minimum EOS; TerminAttr ships in EOS 4.17+ and can be upgraded as a <code>.swix</code> extension (1.3).</li>
+          <li><b>p.69</b> Chrome or Firefox. eAPI must be on for devices added manually; ZTP does it for you. CVP began as config management (Network Provisioning) and grew workflow automation, streaming telemetry, network-wide rollback and compliance, plus integrations (ServiceNow, VMware, firewall vendors) and apps. It isn't an SNMP tool, and "single pane of glass" undersells it. Config is pushed through eAPI and config sessions; telemetry comes from TerminAttr streaming SysDB in real time.</li>
+          <li><b>p.70</b> Compliance pages show bug exposure, security advisories and config/image compliance per device (this used to need CVX). Network Provisioning is a configuration hierarchy, not a topology: devices sit in containers under the root <b>Tenant</b>, the number beside a container is the devices below it, and configlets applied to a container reach every device under it (e.g., AAA for all, spine-only config on a Spine container). ZTP-learned switches land in <b>Undefined</b>.</li>
+          <li><b>p.71</b> A switch in Undefined only gets Tenant-level configlets; right-click, Move, to place it. You don't have to use Network Provisioning; Ansible and other tools work alongside the rest of CVP. Some customers never log into a switch: everything is configlets. <b>Configlet builder</b> makes configlets dynamically from Python or a web form (e.g., a form that asks for an IP and mask and outputs the management interface config).</li>
+          <li><b>p.71–72</b> A <b>task</b> is a pending job (config change, image push). You don't create one directly: apply a configlet to a node or container and save, and CVP makes one task per affected device, shown as a yellow T. A task shows designed vs running config and keeps its logs.</li>
+          <li><b>p.72</b> <b>Change control</b> runs tasks: one at a time, in a chosen order, or on a schedule, with snapshots before and after. A <b>snapshot</b> is data about one or more devices at a moment; it can be custom (e.g., <code>show ip bgp</code> every N minutes) and compared pre/post. <b>Image management</b> holds <b>image bundles</b>: one "image" may be EOS plus TerminAttr, which confuses people. The page shows where each bundle is applied.</li>
+          <li><b>p.72–73</b> <b>Rollback</b> restores config, image, or both. <b>Device rollback</b> is one switch; <b>network rollback</b> is a container and everything below it. Right-click, Manage, Rollback; pick a point on the timeline or a checkpoint; it builds a change control. The author ranks it among CVP's best features.</li>
+          <li><b>p.73</b> <b>Events</b> are rated Info, Warning, Error or Critical and shown on a timeline. Opening one shows the data that matters for that type (for output errors: interface details, DOM levels, counters; for high CPU: per-core load, memory, processes), with sliders to widen the time window.</li>
+          <li><b>p.73–74</b> <b>Cloud Tracer</b> shows latency, jitter, HTTP response time and packet loss from your switches to cloud endpoints. <b>Topology</b> is built from LLDP and needs layout hints (node type, datacenter, pod, flock, rack) to look right; untagged devices pile into one "Untagged" cluster. Link layers color links by bandwidth, throughput, errors or discards, live, without SNMP.</li>
+        </ul>
+        <p class="note">Book vs current CloudVision: the book shows the 2018–2019 GUI. Today, <b>Studios and Workspaces</b> are the main provisioning model (2.3, 7.2) and Network Provisioning is the legacy option. Cloud Tracer appears as Connectivity Monitor. CVaaS (hosted) sits beside on-prem CVP, and current CVP needs much bigger VMs than the book's figures, so check the release's install guide. The containers, configlets, tasks, change control, snapshots, image bundles and rollback ideas are unchanged, and the exam can still ask about them.</p></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="15"></span><a class="chip" href="https://www.arista.com/en/cg-cv/cv-introduction-to-cloudvision" target="_blank" rel="noopener"><b>CV</b>CloudVision guide</a><a class="chip lab" data-lab="obj-2-1" href="#"><b>LAB</b>D2</a></div>
     </div>
@@ -962,9 +1057,12 @@ management api http-commands
           <li><b>Designed config</b> is the merge of all configlets that apply to a device. <b>Running config</b> is what the device has. CloudVision flags differences as out of compliance.</li>
           <li><b>Reconcile</b> captures running-config lines that no configlet owns into a reconcile configlet, so the next push won't remove them.</li>
           <li>Any change creates a <b>task</b>. Tasks go into a <b>change control</b> with stages run in series or in parallel, a review, an approval, and execution.</li>
-          <li><b>Snapshots</b> capture show-command output before and after a change. <b>Rollback</b> returns a device (or the whole network) to an earlier config and image.</li>
+          <li><b>Tasks</b> appear when you save a configlet or image change: one per affected device, marked with a yellow T until a change control runs them. <span class="pg">AW 15 p.71–72</span></li>
+          <li><b>Snapshots</b> capture show-command output before and after a change; custom snapshot templates add your own commands. <span class="pg">AW 15 p.72</span></li>
+          <li><b>Rollback</b>: <b>device</b> rollback (one switch) or <b>network</b> rollback (a container and everything under it), for config, image, or both. Pick a time on the timeline; CVP builds a change control. <span class="pg">AW 15 p.72–73</span></li>
           <li><b>Configlet builders</b> are Python with a form that generate per-device configlets (hostname, IPs) from inputs.</li>
-          <li><b>Image bundles</b> hold an EOS image plus extensions and are assigned like configlets.</li>
+          <li><b>Image bundles</b> hold an EOS image plus extensions (often TerminAttr) and are assigned like configlets. "Image" in CVP usually means a bundle. <span class="pg">AW 15 p.72</span></li>
+          <li>The provisioning tree is a <b>config hierarchy, not a topology</b>. Use the Topology view to see how devices are cabled. <span class="pg">AW 15 p.70</span></li>
           <li><b>ZTP</b>: a factory-default switch gets DHCP with a bootfile URL pointing to CVP, registers, and lands in the Undefined container. <b>ZTR</b> (replacement) gives a new switch the config of the one it replaces. Details below. <span class="pg">AW 13 p.61</span></li>
         </ul></div>
         <div class="part"><h4>Workflow</h4>
@@ -995,6 +1093,8 @@ option bootfile-name
           <li>Creating tasks but never executing the change control.</li>
           <li>Two configlets that set the same line with different values; the last one in order wins.</li>
           <li>Moving a device to a new container drops the old container's configlets.</li>
+          <li>A ZTP'd switch left in Undefined only has Tenant-level config. Move it to its container before you call it done. <span class="pg">AW 15 p.71</span></li>
+          <li>Rolling back a container rolls back every device under it. Pick device rollback when only one switch is wrong. <span class="pg">AW 15 p.72–73</span></li>
         </ul></div>
       </div>
       <div class="cols">
@@ -1116,6 +1216,7 @@ Role:Leaf AND NOT device:leaf4</pre></div>
   </article>
 
   <div class="practice"><h3>Practice: D2</h3>
+    <details class="q"><summary>Only spine2 has the wrong config after a change control, but the change was applied to the Spine container. Which rollback do you use?</summary><div class="a"><p>Device rollback on spine2 to the point before the change. A network rollback on the Spine container would roll back every spine.</p></div></details>
     <details class="q"><summary>A colleague added a banner on leaf2 via CLI. You must push a new configlet from CloudVision without losing it. What first?</summary><div class="a"><p>Reconcile leaf2. CloudVision builds a reconcile configlet with the banner line so the designed config includes it. Then add your configlet and push through a change control.</p></div></details>
     <details class="q"><summary><span>A switch keeps "losing" the hostname you typed and logs <code>ZTP-5-DHCP_QUERY</code>. What's happening, and what are your options?</span></summary><div class="a"><p>It's in ZTP (no startup-config) and its retries wipe your changes. Use <code>zerotouch cancel</code> (skip ZTP once), <code>zerotouch disable</code> (permanent, via <code>flash:zerotouch-config</code>), or give it a DHCP bootfile. Both commands reload immediately.</p></div></details>
     <details class="q"><summary>Ten new leaves arrive factory-fresh. How do they get to the right config with no console work?</summary><div class="a"><p>ZTP: DHCP hands each switch a bootfile URL on CVP, they register into the Undefined container, you move each to its container (inheriting configlets), add device configlets or a builder, assign the image bundle, and execute the change control.</p></div></details>
@@ -1220,6 +1321,9 @@ show event-monitor lacp verbose
           <li><b>Endpoint search</b>: find a MAC or IP and see the switch and port it lives on, with history.</li>
           <li><b>Topology</b>: auto-built from LLDP. Custom hierarchies and filters group devices by tag.</li>
           <li>Because state is streamed with history, you can scrub the timeline back to before a fault ("time machine").</li>
+          <li>Event severities: Info, Warning, Error, Critical. Opening an event shows the right data for its type (interface errors with DOM levels; high CPU with per-core load and processes) and a timeline you can widen. <span class="pg">AW 15 p.73</span></li>
+          <li><b>Topology layout hints</b> (node type, datacenter, pod, rack) tell CV how to draw the fabric; without them devices sit in one Untagged cluster. Link layers show utilization, errors and discards in real time. <span class="pg">AW 15 p.74</span></li>
+          <li><b>Connectivity Monitor</b> (the book's Cloud Tracer) probes latency, jitter, loss and HTTP response time from switches to targets you choose. <span class="pg">AW 15 p.74</span></li>
         </ul></div>
         <div class="part"><h4>Where to look</h4>
 <pre>Dashboards  &gt; New dashboard &gt; add widgets
@@ -1252,7 +1356,9 @@ Topology    &gt; Settings &gt; custom hierarchy by tag</pre></div>
           <li><b>SNMP</b>: prefer v3 with auth and privacy. Bind to the MGMT VRF.</li>
           <li><b>sFlow</b>: sampled packet headers plus counters to a collector. Good for top talkers.</li>
           <li><b>LANZ</b>: sub-millisecond queue-depth reporting from the ASIC. SNMP graphs average over 5 minutes and hide microbursts that fill buffers and drop packets. LANZ only reports; it doesn't change how traffic flows. Hardware-only, so not in vEOS or cEOS. <span class="pg">AW 23 p.123</span></li>
-          <li><b>Port mirroring</b>: local SPAN, remote via GRE, or to the CPU so you can run tcpdump on the switch.</li>
+          <li><b>Port mirroring</b>: local SPAN, remote via GRE, or to the CPU so you can run tcpdump on the switch. Mirroring is done in the ASIC; the destination types (Ethernet, Port-Channel, tunnel, Cpu) depend on platform. <span class="pg">AW 25 p.134–135</span></li>
+          <li><b>tcpdump</b> only sees packets to or from the CPU. From the CLI use EOS names (<code>tcpdump interface Ethernet1</code>); from bash use kernel names (<code>et1</code>, <code>ma1</code>, <code>vlan4094</code>, <code>et1_1_1</code> for <code>Ethernet1/1/1</code>; list them with <code>ifconfig -s</code>). <span class="pg">AW 25 p.133–134</span></li>
+          <li><b>Mirror to Cpu</b> creates a <code>mirror0</code> interface (<code>mirror1</code> for the next session, up to 16) that tcpdump can read. CoPP limits what reaches the CPU (the book quotes about 800 Mbps), so filter with an ACL on the session and truncate packets to keep inside it. <span class="pg">AW 25 p.135–137</span></li>
           <li><b>TAP aggregation</b>: turns a switch into a packet broker. Tap ports (receive only) bring in copies of traffic; tool ports (transmit only) feed analyzers; aggregation groups join them. Real-world depth, not tested on the lab exam. <span class="pg">AW 26 p.140–141</span></li>
           <li><code>watch</code> re-runs a command every N seconds; useful on counters.</li>
         </ul></div>
@@ -1276,7 +1382,13 @@ show queue-monitor length csv &gt; flash:lanz.csv
 
 monitor session CAP source Ethernet5 both
 monitor session CAP destination Cpu
+monitor session CAP ip access-group CAP-FILTER  <span class="c">! only matches</span>
+monitor session CAP truncate        <span class="c">! headers only (size: platform)</span>
+show monitor session CAP            <span class="c">! Cpu: active (mirror0)</span>
 bash sudo tcpdump -i mirror0 -nn -c 50
+tcpdump monitor CAP                 <span class="c">! same, from the CLI</span>
+tcpdump interface Ethernet1 file flash:cap.pcap packet-count 500
+bash tcpdump -r /mnt/flash/cap.pcap -nn | head
 
 tcpdump interface Ethernet1 filter icmp   <span class="c">! CPU-bound only</span>
 watch 2 show interfaces Ethernet1 counters rates</pre></div>
@@ -1290,6 +1402,9 @@ watch 2 show interfaces Ethernet1 counters rates</pre></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>tcpdump on a front-panel interface only sees traffic to or from the CPU. Mirror to Cpu to see transit traffic.</li>
           <li>sFlow source in the wrong VRF; datagrams never reach the collector.</li>
+          <li>In bash, <code>tcpdump -i e10</code> or <code>-i Ethernet10</code> fails ("No such device"): use <code>et10</code>. Linux names can't be abbreviated. <span class="pg">AW 25 p.133</span></li>
+          <li>A <code>-w</code>/<code>file</code> capture is pcap, not text: read it with <code>tcpdump -r</code> or Wireshark. Delete old captures; they fill flash fast (use <code>drive:</code> if there's an SSD). <span class="pg">AW 25 p.133–134</span></li>
+          <li>Mirroring a 10G or 100G port to the CPU: CoPP drops most of it. Filter with an ACL and truncate. On some ASICs (the book's 7280R) the ACL only works on RX sources. <span class="pg">AW 25 p.136–137</span></li>
           <li>TAP aggregation <code>mode exclusive</code> turns all switching off on that switch.</li>
           <li>LANZ thresholds: on some platforms tab-completing gives <code>threshold</code> (singular), which sets only the high mark. Type <code>thresholds &lt;high&gt; &lt;low&gt;</code>. Units differ by platform (bytes on newer ASICs, buffer segments on older ones); check with <code>?</code>. <span class="pg">AW 23 p.125</span></li>
           <li>Writing CSV output to a non-persistent location; save to <code>flash:</code> if it must survive a reboot. <span class="pg">AW 23 p.126</span></li>
@@ -1304,6 +1419,16 @@ watch 2 show interfaces Ethernet1 counters rates</pre></div>
           <li><b>p.125</b> Enable LANZ globally with <code>queue-monitor length</code>, then set per-interface thresholds (high then low). <code>show queue-monitor length status</code> shows the mode and every port's thresholds. <code>show queue-monitor length &lt;intf&gt;</code> shows the records with queue length and duration.</li>
           <li><b>p.125</b> The Ingress Port-set column lists every port on the same ASIC core as the congested port, so it narrows down where the burst came in, not the exact port. <code>show platform jericho mapping</code> shows the port-to-core mapping on Jericho-based switches.</li>
           <li><b>p.126</b> For analysis, CloudVision graphs LANZ data, and it can be streamed out (Google Protocol Buffers). Without those, the <code>csv</code> keyword dumps up to the last 100,000 over-threshold events, oldest first; redirect it to a file on <code>flash:</code> and open it in a spreadsheet.</li>
+        </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 25, tcpdump and Advanced Mirroring: notes by page (p.138 not sent)</h4><ul>
+          <li><b>p.133</b> tcpdump on the switch sees only CPU traffic (to/from the switch), not forwarded traffic, except through Advanced Mirroring. In bash it needs Linux names (<code>et10</code>, <code>ma1</code>; slashes become underscores). <code>-w file</code> writes pcap, <code>-r file</code> reads it, <code>-v</code> adds detail, <code>-X</code> shows hex and ASCII.</li>
+          <li><b>p.134</b> Useful flags: <code>-c</code> count, <code>-n</code>/<code>-nn</code> no name/port lookups, <code>-s</code> snap length, <code>-S</code> absolute sequence numbers, <code>-x</code>/<code>-X</code>/<code>-xx</code> hex dumps. The EOS <code>tcpdump</code> command takes keywords instead (file, filecount, filter, interface, lookup-names, max-file-size, monitor, packet-count, queue-monitor, size, verbose), accepts EOS names and abbreviations, and now handles <code>file flash:…</code> correctly. Capture files are large: clean up, or write to the SSD. You can capture on SVIs too, e.g. the MLAG peer VLAN 4094.</li>
+          <li><b>p.134–135</b> Normal mirror destinations are Ethernet, Port-Channel and GRE tunnel; the copying is done by the ASIC, so tcpdump can't see it. Some platforms (7280R and others) add a <b>Cpu</b> destination. Lab: A – Z – B routed, a continuous ping from A to B; tcpdump on Z's Ethernet2 shows only BGP and LLDP. Pinging Z's own interface does show up.</li>
+          <li><b>p.136</b> <code>monitor session GAD source ethernet 1 rx</code> (and 2), <code>destination cpu</code>; <code>show monitor session</code> shows Cpu active as <code>mirror0</code>. <code>tcpdump -i mirror0</code> now shows the transit pings. CoPP protects the CPU (about 400 Mbps in older code, about 800 Mbps now), far below a 10G port. Fix: an ACL on the session (<code>monitor session GAD ip access-group Filter12</code>), on all sources or per source.</li>
+          <li><b>p.137</b> On the 7280R an ACL in the TX direction doesn't work, so mirror RX on each port. iperf (in the book's EOS) generated 144 MB through Z, and the filtered capture still showed only the six ping packets. The iperf server needed TCP 5001 allowed in the control-plane ACL (the book's 4.21 syntax: <code>control-plane</code>, <code>ip access-group Allow-Iperf in</code>; current EOS: <code>system control-plane</code>). <code>monitor session GAD truncate</code> keeps only headers; size choices are platform-specific (128 or 192 bytes on the 7280R).</li>
+          <li><b>p.139</b> With truncate size 192, 1,000-byte pings show in tcpdump as truncated-ip with 888 bytes missing: headers only, so far more stays under CoPP. Mirroring to the CPU can hurt the switch; that's why CoPP exists. A real sniffer is still better, but this works remotely at 4 a.m.</li>
         </ul></div>
       </div>
       <div class="book-notes">
@@ -1336,6 +1461,7 @@ show tap aggregation groups</pre></div>
         <div class="part"><h4>Know</h4><ul>
           <li>Work bottom-up: physical (optics, light levels, errors), L2 (LLDP, STP, LACP, MLAG), L3 (routing, ARP), overlay (VXLAN, EVPN). See <a href="#tshoot">R2</a>.</li>
           <li>Optics: DOM readings for Rx/Tx power. Low Rx with CRC errors usually means a dirty fiber or bad optic.</li>
+          <li><b>LLDP</b> (IEEE 802.1AB) is on by default on every port, sending every 30 s with a 120 s hold time. A new neighbor is logged (<code>LLDP-5-NEIGHBOR_NEW</code>). It's the fastest way to prove cabling, and CloudVision's topology is built from it. EOS doesn't run CDP, so a Cisco switch needs <code>lldp run</code> to see Arista. <span class="pg">AW 11 p.54</span></li>
           <li>Software: crashed agents leave logs; <code>show agent logs crash</code>. CPU spikes: <code>show processes top once</code>.</li>
           <li>Hardware tables: <code>show hardware capacity</code> for TCAM and route/MAC limits. A route can be in the RIB but not in the ASIC: <code>show ip route</code> warns and marks those with <code>*</code>. <span class="pg">AW 20 p.108</span></li>
           <li><code>show tech-support</code> is what TAC wants; the scheduler keeps hourly copies.</li>
@@ -1349,6 +1475,9 @@ show interfaces counters errors
 show interfaces Ethernet1 transceiver
 show interfaces Ethernet1 phy detail
 show lldp neighbors
+show lldp neighbors Ethernet33 detail  <span class="c">! chassis, port, mgmt IP, VLAN</span>
+show lldp                  <span class="c">! timers, TLVs, per-port tx/rx</span>
+show lldp traffic
 show logging last 30 minutes
 show agent logs crash
 show processes top once
@@ -1375,11 +1504,28 @@ delete flash:Bgp.txt</pre></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>An errdisabled port (BPDU guard, link-flap) needs <code>shutdown</code> / <code>no shutdown</code> or errdisable recovery after the cause is fixed.</li>
           <li>Speed/FEC mismatch on 25G/100G links leaves the link down with both sides "notconnect".</li>
+          <li>Empty <code>show lldp neighbors</code> on a link that's up: LLDP off on the far end (common on Cisco, which defaults to CDP), <code>no lldp transmit</code>/<code>receive</code> on a port, TapAgg ports, or a Linux bridge in a lab eating LLDP frames (R5). <span class="pg">AW 11 p.54</span></li>
+          <li>The neighbor "Device ID" is hostname plus domain name, and <code>show lldp neighbors detail</code> lists every port, even ones with 0 neighbors; filter by interface. <span class="pg">AW 11 p.54</span></li>
           <li>Traces keep running and filling flash until you stop them, and there is no single "undebug all": run <code>no trace &lt;agent&gt; enable * all</code> for each agent, then delete the files. <span class="pg">AW 29 p.160</span></li>
           <li>Trace facility names must match <code>show trace &lt;agent&gt;</code> exactly, including case and the <code>::</code>. A lowercase or all-caps version is rejected. <span class="pg">AW 29 p.159</span></li>
           <li>Which agent? With the multi-agent routing model (the default on current EOS) BGP runs in the <code>Bgp</code> agent. In the book's 4.21 ribd model it was <code>Rib</code>, with facilities like <code>Rib::Bgp::*</code>. <span class="pg">AW 29 p.158–159</span></li>
           <li>BGP shows the prefixes received, so it "looks fine", but traffic to some of them drops: they're not programmed in hardware. Count them with <code>show ip route | grep ^* | wc -l</code>. <span class="pg">AW 20 p.108</span></li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 11, Link Layer Discovery Protocol: notes by page</h4><ul>
+          <li><b>p.54</b> LLDP is the open (802.1AB) neighbor discovery protocol. An Arista 7010T cabled to an old Cisco 3750 found it straight away and logged a new neighbor, with no config. <code>show lldp</code> gives the timers (30 s transmit, 120 s hold, 2 s reinit delay), the management-address VRF, the optional TLVs sent (port and system description, capabilities, management address, port VLAN, link aggregation, max frame size) and tx/rx per port.</li>
+          <li><b>p.54</b> <code>show lldp neighbors</code> adds table counters (inserts, deletes, drops, age-outs) and the neighbor's device ID (hostname.domain) and port. The 3750 didn't see Arista until <code>lldp run</code> was added on the Cisco side; then it also found an LLDP-capable unmanaged switch and an IP phone that speaks both CDP and LLDP.</li>
+          <li><b>p.54</b> <code>show lldp neighbors detail</code> is sorted by local interface and lists all of them. Per neighbor: chassis ID, port ID, TTL, system name and description (software version), capabilities, management address, port VLAN, and autonegotiation/MAU type. Add an interface to filter. The author uses LLDP in ZTP scripts (ch. 13) to pick a config by neighbor.</li>
+        </ul>
+<pre><span class="c">! current EOS knobs (defaults shown)</span>
+lldp timer 30
+lldp hold-time 120
+lldp management-address Management1
+lldp management-address vrf MGMT
+interface Ethernet5
+   no lldp transmit      <span class="c">! or: no lldp receive</span>
+no lldp run              <span class="c">! global off (don't)</span></pre></div>
       </div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 20, FlexRoute: notes by page (real-world depth, not an exam objective)</h4><ul>
@@ -1413,6 +1559,8 @@ show ip route summary</pre></div>
   </article>
 
   <div class="practice"><h3>Practice: D3</h3>
+    <details class="q"><summary>You mirror a busy 100G port to the CPU and tcpdump on mirror0 shows a trickle with gaps. Why, and how do you fix it?</summary><div class="a"><p>CoPP limits CPU-bound traffic to well under a gigabit, so most mirrored packets are dropped. Add an ACL to the monitor session so only the flows you care about are copied, and turn on <code>truncate</code> to send headers only.</p></div></details>
+    <details class="q"><summary><span>leaf1's Ethernet1 is up to a Cisco switch, but <code>show lldp neighbors</code> is empty. What's the likely cause?</span></summary><div class="a"><p>The Cisco side isn't running LLDP (it defaults to CDP, which EOS doesn't speak). Add <code>lldp run</code> there. Also check for <code>no lldp transmit/receive</code> on either port.</p></div></details>
     <details class="q"><summary>Save the output of "show ip bgp summary" every 15 minutes, keeping one day of files.</summary><div class="a"><pre>schedule bgp-sum interval 15 max-log-files 96 command show ip bgp summary</pre></div></details>
     <details class="q"><summary>A host says it moved last night. How do you prove when and where its MAC moved?</summary><div class="a"><p><code>show event-monitor mac match-mac &lt;mac&gt;</code> on the switch (only if event monitor was already enabled, since it is off by default), or endpoint search in CloudVision, which keeps location history.</p></div></details>
     <details class="q"><summary>Users report slow backups at 02:00, but the 5-minute SNMP graph for the storage uplink never passes 40%. How do you prove or rule out microbursts?</summary><div class="a"><p>Enable LANZ (<code>queue-monitor length</code>, ideally <code>notifying</code>), set thresholds on the uplink, and after the next backup check <code>show queue-monitor length &lt;intf&gt;</code> for S/U/E records, or dump <code>csv</code> to flash. Also check output discards on the interface. (AW ch.23 p.123–126)</p></div></details>
