@@ -732,9 +732,9 @@ show spanning-tree bridge detail | include agent
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li>Extensions (.swix/.rpm) add features or hotfixes. Install, then copy to boot-extensions so they survive a reload. TerminAttr is an extension.</li>
-          <li>Aboot is the bootloader. Press Ctrl-C at boot to get the <code>Aboot#</code> shell and boot an image by hand.</li>
-          <li>Lost password: from Aboot, rename <code>/mnt/flash/startup-config</code> and boot. The switch comes up with no config.</li>
-          <li><code>fullrecover</code> in Aboot wipes flash back to factory. Last resort.</li>
+          <li>Aboot is the bootloader. It reads <code>flash:boot-config</code> and boots the SWI it names. It stops at an <code>Aboot#</code> shell if boot-config or the image is missing or corrupt, or if you press Ctrl-C at the prompt. <span class="pg">AW 14 p.63</span></li>
+          <li>Lost password: from Aboot, edit <code>/mnt/flash/startup-config</code> and comment out the <code>username</code> lines, or rename the file (the switch then boots with no config and may go into ZTP). <span class="pg">AW 14 p.67</span></li>
+          <li><code>fullrecover</code> in Aboot wipes all of flash back to factory. Last resort. <span class="pg">AW 14 p.65</span></li>
           <li>Health: <code>show version</code> (free memory), <code>dir flash:</code>, <code>show agent logs crash</code>, <code>show logging</code>.</li>
         </ul></div>
         <div class="part"><h4>Configure</h4>
@@ -746,7 +746,12 @@ show extensions
 <span class="c">! Aboot shell (Ctrl-C during boot)</span>
 Aboot# cd /mnt/flash
 Aboot# mv startup-config startup-config.old
-Aboot# boot flash:EOS-4.32.2F.swi</pre></div>
+Aboot# boot flash:EOS-4.32.2F.swi
+
+show boot                        <span class="c">! SWI, console speed, Aboot password</span>
+boot system flash:EOS-4.32.2F.swi
+boot secret &lt;pw&gt;               <span class="c">! Aboot password (SHA-512)</span>
+boot console speed 9600</pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
@@ -756,6 +761,64 @@ Aboot# boot flash:EOS-4.32.2F.swi</pre></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>Installing an extension but not adding it to boot-extensions.</li>
           <li>Extension built for a different EOS architecture (32/64-bit) shows as not installable.</li>
+          <li>Setting <code>boot secret</code> and losing it: three wrong Aboot passwords only offer <code>fullrecover</code>. <span class="pg">AW 14 p.65</span></li>
+          <li>Not enough flash for a new image: <code>dir flash:</code> and delete old <code>.swi</code> files first (keep the running one and one known-good).</li>
+        </ul></div>
+      </div>
+      <div class="cols">
+        <div class="part"><h4>Aboot in depth (AW ch. 14)</h4><ul>
+          <li><b>Aboot is a tiny BusyBox Linux</b>, so it behaves like any shell: <code>ls</code>, <code>cd</code>, <code>cp</code>, <code>more</code>, <code>vi</code>, <code>boot</code>, <code>swiinfo</code>, <code>recover</code>, <code>reboot</code>, <code>netconf</code>/<code>udhcpc</code>, <code>wget</code>, <code>scp</code>, <code>showtech</code>. <code>flash:</code> is <code>/mnt/flash</code>; files EOS creates at runtime (like your home directory) aren't there. Fans run at full speed while you're in Aboot. <span class="pg">AW 14 p.63–64</span></li>
+          <li><b>boot-config keys</b> (<code>KEY=value</code>, viewable with <code>show boot</code> or <code>more /mnt/flash/boot-config</code>): <code>SWI</code> (flash:, usb1:, http, ftp with user:pass, tftp, nfs), <code>CONSOLESPEED</code> (1200–38400, default 9600, set with <code>boot console speed</code>), <code>PASSWORD</code> (set only with <code>boot secret</code>, stored SHA-512), and <code>NET*</code>. <span class="pg">AW 14 p.64–65</span></li>
+          <li><b>NET* keys</b> let Aboot reach the network to fetch the SWI: <code>NETDEV=ma1</code> (Management1 is the only usable port; the ASIC isn't loaded), <code>NETAUTO=dhcp</code> or <code>NETIP</code>/<code>NETMASK</code>/<code>NETGW</code>, <code>NETDOMAIN</code>, <code>NETDNS</code>. IPv4 only, dotted-decimal masks, and settable only from Aboot or bash, not the EOS CLI. Pressing Ctrl-C too early stops them loading. <span class="pg">AW 14 p.66</span></li>
+          <li><b>Manual network boot:</b> <code>ifconfig ma1 &lt;ip&gt; netmask &lt;mask&gt;</code> (without <code>netmask</code> you get a classful mask), <code>wget</code> the image into <code>/mnt/flash</code>, set <code>SWI=</code> in boot-config with <code>vi</code>, and reboot. <span class="pg">AW 14 p.66</span></li>
+          <li><b>Aboot password:</b> <code>boot secret</code> puts a SHA-512 hash in boot-config; you're asked for it at Ctrl-C. <code>no boot secret</code> removes it. It can't be recovered: three wrong tries give only <code>fullrecover</code>. <span class="pg">AW 14 p.65</span></li>
+          <li><b><code>fullrecover</code> erases everything on flash</b>: all SWIs, boot-config, startup-config, zerotouch-config, schedule logs, <code>/persist</code>. It restores the factory EOS image (possibly older) and reboots. Use it only for a lost Aboot password plus lost EOS passwords, or a switch too broken for anything else. <span class="pg">AW 14 p.65</span></li>
+          <li><b>FPGA upgrades</b> can run during the first boot of a new image (upgrade or downgrade): 6–12 minutes and extra reboots on some models. Never power-cycle during "Upgrading … fpga". <span class="pg">AW 14 p.65</span></li>
+          <li><b>Newer platforms:</b> Aboot versions and Secure Boot support vary by model. With Secure Boot, the switch only boots Arista-signed images, which blocks tampered SWIs but also custom or unsigned builds. Check <code>show version detail</code> and the platform's release notes before relying on Aboot tricks.</li>
+          <li><b>Virtual labs:</b> vEOS-lab has Aboot (try all of this in EVE-NG safely); cEOS has no bootloader at all.</li>
+        </ul></div>
+        <div class="part"><h4>Recovery runbook</h4>
+<pre><span class="c"># before every upgrade</span>
+dir flash:                          <span class="c">! room for the new .swi?</span>
+delete flash:EOS-old.swi            <span class="c">! keep current + 1 good</span>
+copy https://srv/EOS-4.32.2F.swi flash:
+verify /sha512 flash:EOS-4.32.2F.swi  <span class="c">! compare with arista.com</span>
+boot system flash:EOS-4.32.2F.swi
+show boot
+write memory
+<span class="c">! need: console server access, a known-good .swi,</span>
+<span class="c">! backup of startup-config off-box</span>
+
+<span class="c"># 1. bad or missing image (boots to Aboot#)</span>
+Aboot# cd /mnt/flash ; ls *.swi
+Aboot# boot flash:EOS-known-good.swi     <span class="c"># one-off</span>
+<span class="c">#   or fix it for good:</span>
+Aboot# vi boot-config                     <span class="c"># SWI=flash:EOS-known-good.swi</span>
+<span class="c">#   no image on flash: fetch one</span>
+Aboot# ifconfig ma1 10.0.0.19 netmask 255.255.255.0
+Aboot# wget http://10.0.0.100/EOS-4.32.2F.swi
+Aboot# swiinfo EOS-4.32.2F.swi ; reboot
+
+<span class="c"># 2. flash full</span>
+Aboot# cd /mnt/flash ; ls -l
+Aboot# rm EOS-unused.swi   <span class="c"># or old debug/ schedule/ logs</span>
+
+<span class="c"># 3. lost EOS password</span>
+Aboot# cd /mnt/flash
+Aboot# vi startup-config   <span class="c"># comment out username lines</span>
+Aboot# reboot              <span class="c"># log in as admin, no password</span>
+<span class="c">#   then set new secrets and write memory</span>
+
+<span class="c"># 4. lost Aboot password too</span>
+<span class="c">#   3 wrong tries -> "fullrecover" (erases all flash)</span></pre></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 14, Aboot: notes by page</h4><ul>
+          <li><b>p.63</b> Aboot is EOS's second-stage bootloader (like GRUB). It reads <code>boot-config</code> on flash, and halts at an <code>Aboot#</code> prompt if boot-config is bad or missing, the image is bad or missing, or you press Ctrl-C. Normal boot output, then Ctrl-C into the shell. Fans run loud in Aboot. <code>help</code> lists the BusyBox commands. <code>ls</code> at <code>/</code> shows a normal Linux tree.</li>
+          <li><b>p.64</b> <code>flash:</code> is an EOS name; in Aboot it's <code>/mnt/flash</code> (alongside drive and conf files under <code>/mnt</code>). Runtime files aren't there. boot-config uses EOS-style names (<code>SWI=flash:EOS-4.20.1F.swi</code>). The four kinds of entry: SWI, CONSOLESPEED, PASSWORD, NET. Valid SWI locations: flash, usb1, /mnt/flash, HTTP, FTP (with or without credentials), TFTP, NFS. Network sources need NET settings because only <code>ma1</code> works in Aboot. CONSOLESPEED from 1200 to 38400, default 9600.</li>
+          <li><b>p.65</b> Set PASSWORD only with <code>boot secret</code> from EOS (SHA-512 since about 2015; the first edition used MD5). Three wrong passwords at Aboot offer <code>fullrecover</code>, which erases all of <code>/mnt/flash</code> (SWIs, boot-config, startup-config, zerotouch-config, logs, schedule output, <code>/persist</code>) and restores the factory image: the book's switch dropped from 4.20.1F to 4.19.1F. FPGA upgrades on first boot of a new version can take 10–12 minutes with reboots. <code>no boot secret</code> removes the password.</li>
+          <li><b>p.66</b> NET keys: NETDEV (ma1 only on fixed switches), NETAUTO=dhcp, NETIP, NETMASK, NETGW, NETDOMAIN, NETDNS. IPv4 and dotted masks only, set from Aboot or bash, not EOS (<code>boot ?</code> offers only console, secret, system, test). Pressing Ctrl-C immediately stopped the NET config from loading; waiting a few seconds worked. More practical: <code>ifconfig ma1</code> with a <code>netmask</code> (otherwise classful), <code>wget</code> the image, edit <code>SWI=</code>, reboot. The procedure is identical on every Arista switch.</li>
+          <li><b>p.67</b> Password recovery, same on every model: boot, Ctrl-C, <code>cd /mnt/flash</code>, <code>vi startup-config</code>, comment out the <code>username</code> lines, reboot and log in as admin with no password. Or <code>mv startup-config startup-config.bak</code> for a blank config (which may trigger ZTP). The author once rescued a switch stuck so badly it couldn't cancel ZTP or take config, using <code>fullrecover</code>.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="14"></span><span data-ch="16"></span><span data-ch="12"></span><a class="chip lab" data-lab="obj-1-3" href="#"><b>LAB</b>D1</a></div>
