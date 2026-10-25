@@ -1974,6 +1974,52 @@ banner login</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d2-cvp-drills">
+    <h3>CloudVision drills for the EVPN VXLAN 101 lab</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/42%5B%3Bvnd.vst.idref%3Dchapter-idm45591789292984%5D!/4/2/2%5Bcloudvision_idd0025%5D" target="_blank" rel="noopener">AW Ch 15 · CloudVision</a> (pp. 68-74). The book's screenshots are from an older CloudVision Portal, so menus have moved, but the model it explains is the one the EVPN VXLAN 101 lab uses: Network Provisioning with containers, configlets, tasks, change control, snapshots, image bundles and rollback. Do these drills in that lab (<a href="#lab-d2-evpn101">how it maps to our objectives</a>); each one fits between the lab's own steps and takes 10 to 20 minutes.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> CloudVision is a family: CloudVision eXchange (CVX, a vEOS used as a controller, for example for VXLAN flood lists) and CloudVision Portal (CVP), which is what people usually mean (p. 68). CVP is a large VM or cluster, not something for a laptop, and it works best with AAA set up, because the user who logs in to the portal is the user who changes the switches (p. 68). Switches need eAPI enabled to be added by hand; ZTP-onboarded switches get it automatically (p. 68). CVP does not SSH in and type commands: it pushes changes through eAPI into a configuration session, so every change is a session replace (p. 69, AW Ch 9). Telemetry comes from TerminAttr streaming SysDB state in real time, not from SNMP polling (p. 69). Network Provisioning is a configuration hierarchy, not a network map: devices sit in containers, containers inside containers, and a configlet attached to a container applies to every device below it (pp. 70-71). New ZTP devices land in the Undefined container and get only what the root container carries (pp. 70-71). Applying a configlet does not change anything yet: it creates a task (a yellow T), and tasks are run individually or grouped in a change control, which takes pre and post snapshots (pp. 71-72). A snapshot is the output of chosen commands at one point in time, for a device or a container; you can define custom ones, for example <code>show ip bgp</code> (p. 72). An "image" in Image Management is really an image bundle: an EOS <code>.swi</code> plus extensions such as TerminAttr (p. 72). Rollback can restore configuration, image or both, for one device (device rollback) or a whole container (network rollback), picked from a timeline (pp. 72-73). Network Provisioning is optional: you can use CVP only for telemetry and manage configs with Ansible or by hand (p. 71).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Book concept</th><th>Where to look in a current release</th></tr></thead>
+      <tbody>
+        <tr><td>Network Provisioning, containers, configlets, configlet builder (pp. 70-71)</td><td>Provisioning, then Network Provisioning and Configlets. Newer releases add Studios and the Static Configuration Studio (objective <a href="#obj-2-3">2.3</a>).</td></tr>
+        <tr><td>Tasks and change control (pp. 71-72)</td><td>Provisioning, then Tasks and Change Control. Newer releases group them into a change control with stages, approvals and actions.</td></tr>
+        <tr><td>Snapshots (p. 72)</td><td>Snapshot templates, or the pre and post check actions inside a change control.</td></tr>
+        <tr><td>Image Management (p. 72)</td><td>Image bundles under Provisioning, or the Software Management studio.</td></tr>
+        <tr><td>Device and network rollback (pp. 72-73)</td><td>Right-click a device or container, then Manage and Rollback, or roll back an executed change control.</td></tr>
+        <tr><td>Events, Topology, Cloud Tracer (pp. 73-74)</td><td>Events, Network (topology), and Cloud Tracer under Devices or Dashboards, depending on release (objective <a href="#obj-3-2">3.2</a>).</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p><strong>Hierarchy.</strong> Before the lab's first push, sketch the container tree it uses and list which configlets sit at which level. For one leaf, write down every configlet it inherits and from where. Then open the designed config for that leaf and match each block to a configlet.</p></li>
+      <li><p><strong>Configlet and task.</strong> Create a small configlet (a login banner and the alias <code>senz show interfaces counters errors | nz</code>) and attach it to one container. Count the pending tasks it creates, open one, and read the designed vs running diff. Do not run them yet.</p></li>
+      <li><p><strong>Custom snapshot.</strong> Create a snapshot template that collects <code>show ip bgp summary</code>, <code>show bgp evpn summary</code> and <code>show mlag</code>. Use it as the pre and post snapshot of a change control that runs the tasks from task 2, then compare the two snapshots.</p></li>
+      <li><p><strong>Rollback, both kinds.</strong> Roll back one device to before the change (device rollback) and check the banner is gone from it only. Then roll back the whole container (network rollback) and check the rest. Look at what the rollback page offers: config, image, or both.</p></li>
+      <li><p><strong>Out-of-band change.</strong> On one leaf's CLI, add a description to an unused interface. Find the device as out of compliance, read the diff, and then run any change control that touches that device without reconciling. What happens to your description, and why?</p></li>
+      <li><p><strong>Image bundle.</strong> Open an image bundle in the lab and list what is inside it. Note which containers and devices it is applied to.</p></li>
+      <li><p><strong>Telemetry.</strong> While a change control runs, watch Events and the device's interface and BGP views. Find the event for the BGP or MLAG change, and use the timeline to look at the minutes before it.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · notes for each drill</summary>
+      <ol>
+        <li>Devices inherit every configlet from each container above them, plus any configlet attached to the device itself (pp. 70-71). The designed config is that stack in order. If two configlets set the same line, the one applied later in the order usually wins in the designed config, which is a common source of surprise; always read the designed config rather than guessing.</li>
+        <li>One task per device under the container, each shown with a T until it runs (p. 71). The diff shows only the banner and alias, because CVP compares the full designed config with the running config.</li>
+        <li>Snapshot templates take any show command, and a change control can take a snapshot of each device before and after (p. 72). Comparing them is the CloudVision version of "run the show command, make the change, run it again" (p. 72).</li>
+        <li>Device rollback affects one node; network rollback, offered on a container, rolls back every device below it to the same point in time (pp. 72-73). Both create tasks and run through a change control, as a session replace on each switch.</li>
+        <li>The next push replaces the whole running config with the designed one, so the description disappears (p. 69, AW Ch 9). That is the session snapshot trap from <a href="#lab-d1-cfgmgmt">the configuration management traps</a> at the scale of a whole network. Either reconcile it into a configlet first, or put it in a configlet yourself.</li>
+        <li>Expect an EOS <code>.swi</code> and at least a TerminAttr <code>.swix</code> (p. 72). Pushing the bundle installs both, and the extension is made persistent for you (compare <a href="#lab-d1-extensions">the extension system</a>).</li>
+        <li>Events are graded Info, Warning, Error and Critical, and each event type opens the data that matters for it, for example interface counters for output errors or per-core CPU for a high CPU event (p. 73). This is streamed state, so the graphs update as you watch (p. 73).</li>
+      </ol>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Know the life cycle in order: attach a configlet (or image bundle), which creates tasks; tasks run through a change control with snapshots; anything can be rolled back per device or per container. And know that a change from CloudVision is a configuration session replace through eAPI, which is why the designed config always wins over CLI changes.</aside>
+    <aside class="note real"><strong>Real world.</strong> Put configlets at the highest level that is true for every device below it (AAA, NTP, logging, aliases at the top; role-specific blocks at spine and leaf containers; only the truly unique lines on the device). Keep the tree shallow enough that a new engineer can tell where a line comes from. Even if your configs come from AVD or Ansible, keep TerminAttr streaming: the telemetry, events and compliance views are useful on their own (p. 71).</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (in the CloudVision lab): attach a configlet containing <code>no lldp run</code> to the root container, but do not run the tasks.</p>
+      <p>Symptom: every device in the lab shows a pending task, including devices you never meant to touch, and the topology view would lose its links if the tasks ran.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>A configlet on the root container applies to every device below it, including any new device that ZTP drops into Undefined (pp. 70-71). Remove the configlet from the root container and cancel the pending tasks before anyone runs a change control. Always check the task count after you attach a configlet: it should match the number of devices you meant to change.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="lab-d2-ztp">
     <h3>Zero Touch Provisioning: build it on EVE-NG</h3>
     <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/38%5B%3Bvnd.vst.idref%3Dchapter-idm45591789811160%5D!/4/2/2%5Bzero-touch_provisioning%5D" target="_blank" rel="noopener">AW Ch 13 · Zero-Touch Provisioning</a> (pp. 58-61). ZTP is how CloudVision onboards every new switch and replaces failed ones (ZTR), so the D2 questions about onboarding make much more sense once you have built the pieces yourself. You need a vEOS node in EVE-NG and your Ubuntu automation server; cEOS in containerlab always gets a startup-config, so it never enters ZTP.</p>
@@ -2224,6 +2270,7 @@ VNI         VLAN       Source       Interface       802.1Q Tag
       <li>I can build containers, apply configlets and a configlet builder, run a change control with snapshots, and roll it back.</li>
       <li>I can tell reconcile from pushing the designed config and choose correctly.</li>
       <li>I know what an image bundle does and how ZTP and ZTR onboard and replace devices.</li>
+      <li>In the EVPN VXLAN 101 lab I have traced a leaf's configlets through the container tree, run a change control with custom snapshots, done a device and a network rollback, and watched an out-of-band change get overwritten.</li>
       <li>I can build ZTP on EVE-NG with DHCP option 67 and nginx, serve a startup-config and a script bootfile, explain cancel vs disable, and fix a missing shebang, a stale <code>zerotouch-config</code> and a DHCP server that does not answer.</li>
       <li>I can create a workspace, tag devices, use the Static Configuration Studio, review, submit and execute.</li>
       <li>Path B: I can diff designed vs running and remediate drift with a session-based replace.</li>
@@ -2769,9 +2816,89 @@ tapagg# show tap aggregation groups</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d3-capture">
+    <h3>tcpdump and advanced mirroring (vEOS lab)</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/62%5B%3Bvnd.vst.idref%3Dchapter-idm45591787081640%5D!/4/2/2%5Btcpdump_and_advanced_mirroring%5D" target="_blank" rel="noopener">AW Ch 25 · tcpdump and Advanced Mirroring</a> (pp. 133-139). Objective <a href="#obj-3-3">3.3</a> configures a mirror to the CPU on cEOS; here you build the book's three-switch test on vEOS in EVE-NG and work through capture, mirroring, ACL filters and truncation.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> tcpdump on a switch sees only packets to or from the CPU; traffic the ASIC forwards never reaches it (p. 133). In Bash, tcpdump wants Linux interface names: <code>et2</code> for Ethernet2, <code>ma1</code> for Management1, all lowercase, no abbreviations, and slashes become underscores (<code>et1_1_1</code>); <code>ifconfig -s</code> lists them (p. 133). Write captures with <code>-w</code> to get a pcap file for Wireshark and read them with <code>-r</code>, and keep them on <code>/mnt/flash</code> or, better, an SSD (pp. 133-134). The EOS <code>tcpdump</code> command takes EOS names and keywords (<code>interface</code>, <code>filter</code>, <code>file</code>, <code>packet-count</code>, <code>size</code>, <code>monitor</code>, <code>verbose</code>), and its <code>file flash:NAME</code> option works as expected on current releases (p. 134). Normal mirror sessions send copies to another Ethernet port, a port-channel or a GRE tunnel, all handled by the ASIC, so the switch itself still cannot see them (p. 135). <em>Advanced mirroring</em> on supported platforms adds <code>destination cpu</code>: the copies appear on a Linux interface <code>mirror0</code> (then <code>mirror1</code> and so on, per session), which tcpdump can read (pp. 135-136). Copies sent to the CPU are limited by CoPP (the book quotes about 800 Mbps), so you cut them down with an ACL on the session (<code>ip access-group</code>) and with <code>truncate</code> (pp. 136-139).</aside>
+    <h4>Build the test lab</h4>
+    <p>Three vEOS nodes in a line, routed, as in the book (p. 135). Use spare EVE-NG nodes, not the fabric.</p>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Node</th><th>Links</th><th>Addresses</th></tr></thead>
+      <tbody>
+        <tr><td>capA</td><td>Ethernet1 to capZ Ethernet1</td><td>Et1 10.10.1.2/30, Loopback0 11.0.0.11/32, static route to 12.0.0.12 via 10.10.1.1</td></tr>
+        <tr><td>capZ</td><td>Ethernet1 to capA, Ethernet2 to capB</td><td>Et1 10.10.1.1/30, Et2 10.10.2.1/30, static routes to both loopbacks</td></tr>
+        <tr><td>capB</td><td>Ethernet1 to capZ Ethernet2</td><td>Et1 10.10.2.2/30, Loopback0 12.0.0.12/32, static route to 11.0.0.11 via 10.10.2.1</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p>Build the lab, then <code>traceroute 12.0.0.12 source 11.0.0.11</code> from capA to prove the path goes through capZ.</p></li>
+      <li><p>On capZ, in Bash, list the Linux interface names, try <code>tcpdump -i e2</code> and <code>tcpdump -i Ethernet2</code>, then capture 10 packets on the right name. Write a capture of the management port to <code>/mnt/flash/z.pcap</code> and read it back. Then use the EOS <code>tcpdump</code> command to capture on Ethernet2 with a filter for ICMP only, and to write a file to flash.</p></li>
+      <li><p>Start a continuous ping from capA's loopback to capB's loopback (<code>bash ping -I 11.0.0.11 12.0.0.12</code>). Capture on capZ Ethernet2 and note whether you see the transit pings. Then ping capZ's own Ethernet2 address from capB and capture again.</p></li>
+      <li><p>Create monitor session <code>CAP</code> on capZ: Ethernet1 and Ethernet2 received traffic, destination CPU. Find its Linux interface with <code>show monitor session</code> and capture five packets on it.</p></li>
+      <li><p>Add an ACL to the session that matches only traffic to or from 12.0.0.12, and check <code>show monitor session CAP</code>. Generate other traffic at the same time (an iperf3 test or a big ping to capB's Ethernet1 address) and show that only the loopback traffic reaches <code>mirror0</code>.</p></li>
+      <li><p>Turn on truncation for the session, send pings of 1000 bytes, and read the length fields in tcpdump.</p></li>
+      <li><p>Clean up: remove the session, the ACL and every capture file.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · tcpdump in Bash and in EOS</summary>
+      <pre class="cli"><code>capZ# bash
+[admin@capZ ~]$ ifconfig -s
+[admin@capZ ~]$ sudo tcpdump -i e2
+! fails: no such device
+[admin@capZ ~]$ sudo tcpdump -i et2 -c 10 -n
+[admin@capZ ~]$ sudo tcpdump -i ma1 -c 50 -w /mnt/flash/z.pcap
+[admin@capZ ~]$ sudo tcpdump -r /mnt/flash/z.pcap -n | head
+[admin@capZ ~]$ exit
+capZ# tcpdump interface Ethernet2 filter icmp packet-count 10
+capZ# tcpdump interface Management1 file flash:z2.pcap packet-count 50
+capZ# dir flash: | include pcap</code></pre>
+      <p>Linux names follow the CLI short names in lowercase (p. 133). <code>-c</code> limits the count, <code>-n</code> skips name lookups, <code>-X</code> adds a hex and ASCII dump (p. 134). On vEOS without <code>sudo</code> you may get a permission error; the EOS <code>tcpdump</code> command needs no <code>sudo</code>. A file written with <code>-w</code> or <code>file</code> is pcap, so read it with <code>tcpdump -r</code> or copy it off the box to Wireshark (<code>scp</code> from the Ubuntu server) (p. 134).</p>
+    </details>
+    <details class="solution"><summary>Solution · transit traffic vs traffic to the switch</summary>
+      <pre class="cli"><code>capA# bash ping -I 11.0.0.11 12.0.0.12
+capZ# tcpdump interface Ethernet2 filter icmp packet-count 10
+capB# ping 10.10.2.1 repeat 5
+capZ# tcpdump interface Ethernet2 filter icmp packet-count 10</code></pre>
+      <p>On a hardware switch the first capture shows only LLDP and BGP or other control traffic, never the transit pings, while the second shows the pings to capZ's own address (pp. 135-136). On vEOS the forwarding is done in software, so you may see transit packets too; that is a vEOS artifact, and the lesson for hardware is the book's. This is also why a "tcpdump shows nothing" result on a switch proves very little about the data plane.</p>
+    </details>
+    <details class="solution"><summary>Solution · mirror to CPU, ACL filter, truncation</summary>
+      <pre class="cli"><code>capZ(config)# monitor session CAP source Ethernet1 rx
+capZ(config)# monitor session CAP source Ethernet2 rx
+capZ(config)# monitor session CAP destination cpu
+capZ# show monitor session CAP
+! Destination Ports:  Cpu : active (mirror0)
+capZ# bash sudo tcpdump -i mirror0 -c 5 -n
+
+capZ(config)# ip access-list Filter12
+capZ(config-acl-Filter12)# 10 permit ip host 12.0.0.12 any
+capZ(config-acl-Filter12)# 20 permit ip any host 12.0.0.12
+capZ(config-acl-Filter12)# exit
+capZ(config)# monitor session CAP ip access-group Filter12
+capZ# show monitor session CAP
+
+capZ(config)# monitor session CAP truncate
+capA# bash ping -I 11.0.0.11 -c 3 -s 1000 12.0.0.12
+capZ# bash sudo tcpdump -i mirror0 -n
+
+capZ(config)# no monitor session CAP
+capZ(config)# no ip access-list Filter12
+capZ# delete flash:z2.pcap
+capZ# bash sudo rm /mnt/flash/z.pcap</code></pre>
+      <p>Representative steps; check each with <code>?</code>, because CPU destinations, ACL filters and truncation depend on the platform and release (pp. 135-139), and vEOS may not support all of them. The destination name (<code>mirror0</code>) is assigned per session in creation order (p. 136). With the ACL, the session only copies matching packets, so a large iperf transfer between the Ethernet addresses does not reach the CPU at all (pp. 136-137). The book uses RX sources because its platform could not apply mirror ACLs on TX (p. 137). With truncation, tcpdump shows each packet as truncated with hundreds of bytes missing, but the headers are intact (pp. 138-139); some platforms let you pick the size (<code>truncate size ?</code>). To run iperf between switches as the book does, the server side needs its control-plane ACL to permit the iperf port (p. 137); on current EOS use <code>system control-plane</code> and an <code>ip access-group</code> there, and remember iperf3 uses TCP 5201 by default, not 5001.</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Know three facts: on hardware, a switch capture sees only CPU traffic; <code>destination cpu</code> in a monitor session creates <code>mirrorN</code> for tcpdump; and you control the volume with an ACL on the session and truncation, because CoPP limits what reaches the CPU.</aside>
+    <aside class="note real"><strong>Real world.</strong> Mirroring to the CPU is an emergency tool for when no sniffer or TAP is available, for example at 4 a.m. on a remote site (p. 139). Filter at the source with an ACL, truncate, limit the packet count, and stop the session as soon as you have what you need; a forgotten session to the CPU wastes CoPP capacity that control-plane protocols need. Captures fill flash fast, so delete them or write them to an SSD (<code>drive:</code>) and copy them off-box (p. 134). For permanent visibility, use TAP aggregation or a packet broker instead (<a href="#tapagg-sidebar">TAP aggregation</a>).</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (on capZ): a colleague left <code>tcpdump interface Ethernet2 file flash:big.pcap</code> running with no packet count in a background session while capA ran a long iperf test.</p>
+      <p>Symptom: <code>write memory</code> on capZ fails or warns about space, and <code>dir flash:</code> shows very little free space.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>The capture grew without limit and filled flash (p. 134). Stop it (Ctrl-C in its session, or <code>bash sudo pkill tcpdump</code>), delete the file, and check <code>dir flash:</code> again. Next time use <code>packet-count</code>, a filter, a size limit (<code>-C</code> and <code>-W</code> in Bash to rotate files), or write to <code>drive:</code>. The flash health check in objective <a href="#obj-1-3">1.3</a> finds hidden files like this.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="lab-d3-lanz">
     <h3>Microbursts, counter math and LANZ</h3>
-    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/58%5B%3Bvnd.vst.idref%3Dchapter-idm45591787280968%5D!/4/2/2%5Blanz%5D" target="_blank" rel="noopener">AW Ch 23 · LANZ</a>. The chapter's argument (p. 123) is that a 5-minute SNMP graph is just two counter readings subtracted and divided, so it averages away bursts that last a few milliseconds and still fill a buffer. You will do that math by hand on cEOS, then practise the LANZ configuration you would use on hardware to see the bursts.</p>
+    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/58%5B%3Bvnd.vst.idref%3Dchapter-idm45591787280968%5D!/4/2/2%5Blanz%5D" target="_blank" rel="noopener">AW Ch 23 · LANZ</a>. The chapter's argument (p. 123) is that a 5-minute SNMP graph is just two counter readings subtracted and divided, so it averages away bursts that last a few milliseconds and still fill a buffer. For why bursts fill buffers in the first place (fabric collisions, incast, head-of-line blocking), see <a href="#lab-d4-design">Design math</a> (AW Ch 3). You will do that math by hand on cEOS, then practise the LANZ configuration you would use on hardware to see the bursts.</p>
     <aside class="note warn"><strong>Watch out.</strong> LANZ reads queue depth from the switching ASIC, so it only works on platforms whose silicon supports it. It is not available on vEOS or cEOS (AW Ch 23, p. 123). In this lab the LANZ commands are for syntax practice; expect them to be rejected or to report nothing.</aside>
     <ol class="tasks">
       <li><p>Start steady traffic across leaf1's uplink. From host1, run a long ping to host2 with large packets.</p>
@@ -3010,6 +3137,7 @@ leaf1# dir flash: | include trace</code></pre>
 
   <section class="part checkpoint"><h3>Checkpoint</h3>
     <ul class="checklist">
+      <li>On vEOS I can capture with tcpdump in Bash and in EOS, explain why a switch capture misses transit traffic, mirror to the CPU, and filter and truncate the session.</li>
       <li>I can schedule a command, find its output files, and adjust the tech-support schedule.</li>
       <li>I can query the event monitor for MAC, ARP and route history, including with SQL.</li>
       <li>I can write on-intf, on-logging, on-boot and on-counters event handlers whose actions use <code>FastCli</code>, and prove they fired.</li>
@@ -3071,7 +3199,72 @@ Et6           spine2                   Ethernet6           120
 Ma0           ...                      ...                 120</code></pre>
       <p class="check">spine1 sees leaf1 to leaf4 on Eth1 to Eth4 (each on the leaf's Ethernet1) and spine2 on Eth5 and Eth6. leaf1 sees spine1 on Eth1, spine2 on Eth2, leaf2 on Eth3 and Eth4, and host1 on Eth5.</p>
     </div>
+        <h4 id="lab-d4-lldp">LLDP in more depth</h4>
+    <p>This follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/34%5B%3Bvnd.vst.idref%3Dchapter-idm45591789862360%5D!/4/2/2%5Blink_layer_discovery_protocol%5D" target="_blank" rel="noopener">AW Ch 11 · LLDP</a> (p. 54). LLDP (IEEE 802.1AB) is on by default on every EOS port, management included, sending every 30 seconds with a 120-second hold time; a new neighbor is logged as <code>LLDP-5-NEIGHBOR_NEW</code> with no configuration at all (p. 54). The Neighbor Device ID is the hostname plus the configured domain name, so a Cisco switch with no domain shows up as <code>hostname.cisco.com</code> (p. 54). Cisco switches listen to CDP and often do not run LLDP by default: an Arista switch sees the Cisco neighbor, but the Cisco switch does not see the Arista one until someone enters <code>lldp run</code> there, and even then it appears in <code>show lldp neighbors</code>, not in <code>show cdp neighbors</code> (p. 54). Arista's detail view is sorted by local interface and lists every port, including those with no neighbor (p. 54).</p>
+    <ol class="tasks">
+      <li><p>On leaf1, read <code>show lldp</code> (timers, enabled TLVs, per-port Tx and Rx), then <code>show lldp neighbors Ethernet1</code> and <code>show lldp neighbors Ethernet1 detail</code>. From the detail, write down spine1's management address, system description (EOS version) and the port VLAN ID.</p></li>
+      <li><p>Turn off LLDP transmit on leaf1 <code>Ethernet3</code>, wait two minutes, and check leaf2's table. Then turn it back on.</p></li>
+      <li><p>Interop (if you have a Cisco IOS or NX-OS image in EVE-NG): connect it to a spare vEOS port. Check both sides before and after <code>lldp run</code> on the Cisco device, and compare <code>show cdp neighbors</code> with <code>show lldp neighbors</code> there.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · LLDP detail and per-port control</summary>
+      <pre class="cli"><code>leaf1# show lldp
+leaf1# show lldp neighbors Ethernet1
+leaf1# show lldp neighbors Ethernet1 detail
+leaf1# show lldp neighbors detail | include Interface|System Name|Management Address
+
+leaf1(config)# interface Ethernet3
+leaf1(config-if-Et3)# no lldp transmit
+leaf2# show lldp neighbors
+! after the 120 s hold time, leaf1 Et3 disappears from leaf2's table
+leaf2# show lldp neighbors | include table
+leaf1(config-if-Et3)# lldp transmit
+
+! Cisco side, for the interop task
+cisco(config)# lldp run
+cisco# show lldp neighbors
+cisco# show cdp neighbors</code></pre>
+      <p>The table header counts inserts, deletes and age-outs, so a rising age-out count after a change shows a neighbor that stopped sending (p. 54). <code>no lldp receive</code> is the other half; <code>no lldp run</code> turns it off for the whole switch. The detail output also carries the Cisco IOS version string and the 802.3 MAC/PHY autonegotiation fields, which is a quick way to identify an unknown device on a port (p. 54). On the Cisco device, the Arista switch is visible only through LLDP, and you may discover other LLDP speakers (phones, small switches) at the same time (p. 54).</p>
+    </details>
+    <aside class="note real"><strong>Real world.</strong> LLDP is what CloudVision's Topology view, the ZTP scripts that pick a config by upstream port (<a href="#lab-d2-ztp">ZTP lab</a>), and ANTA's cabling tests are built on, so leave it on everywhere inside the data center. Turn off transmit on ports facing untrusted networks, such as an ISP or a customer, where it would reveal your model and EOS version. In mixed Cisco and Arista networks, enable <code>lldp run</code> globally on the Cisco side so both teams see the same neighbor tables.</aside>
     <aside class="note exam"><strong>Exam tip.</strong> The exam topology page shows the intended cabling, but treat it as a claim to verify. <code>show lldp neighbors</code> on each switch is the fastest way to map ports, and it also proves the link is up at Layer 1 and Layer 2.</aside>
+  </section>
+
+  <section class="part" id="lab-d4-design">
+    <h3>Design math: topologies, oversubscription and buffers</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/16%5B%3Bvnd.vst.idref%3Dchapter-idm45591791393480%5D!/4/2/2%5Bnetwork_designs%5D/2/2/1:0" target="_blank" rel="noopener">AW Ch 2 · Network Designs</a> (pp. 16-17) and <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/18%5B%3Bvnd.vst.idref%3Dchapter-idm45591791346920%5D!/4/2/2%5Bbuffers%5D" target="_blank" rel="noopener">AW Ch 3 · Buffers</a> (pp. 18-21). It is pen-and-paper work, about 30 minutes, that explains why this lab's fabric looks the way it does and why the "why is this link dropping" questions in D3 and D5 have the answers they do.</p>
+    <aside class="note"><strong>Key ideas from the chapters.</strong> The old three-tier core, distribution and access design was built for north-south traffic; data centers now carry mostly east-west traffic between servers, which changed the designs (p. 16). <em>Bow tie MLAG</em> is two MLAG pairs joined by one port-channel, a Layer 2 design (p. 16). <em>Leaf-spine</em> is a Clos fabric: every leaf connects to every spine, so any leaf is one spine hop from any other, the spine layer can lose switches and still forward, and with Layer 3 and ECMP all uplinks carry traffic at once (p. 16). How wide it can be depends on the ECMP limit of the hardware (the book cites 128-way on a 7500R, p. 16). A <em>spline</em> is a collapsed leaf-spine where servers plug straight into the spine pair, an end-of-row design for smaller networks (p. 17). A <em>VXLAN overlay</em> rides Layer 2 segments over the routed leaf-spine (p. 17), and a <em>universal spine</em> joins different pods and cloud connections under one spine layer (p. 17). On buffers: a switch fabric connects every input to every output; when two inputs send to one output at the same time, one must wait, and without a buffer the packet is dropped (pp. 18-19). Buffers trade drops for latency (p. 19). A <em>microburst</em> fills a buffer for milliseconds but disappears in one- and five-minute averages (pp. 19-20). <em>Blocking</em> means the fabric cannot carry every port at line rate (oversubscription), and a "480 Gbps" fabric figure may count both directions (p. 20). <em>Head-of-line blocking</em> is a packet at the front of an input queue, waiting for a busy output, holding up packets behind it bound for idle outputs; <em>virtual output queuing</em> (VOQ) fixes it by keeping a separate queue per output at each input (pp. 20-21). Deep buffers help in the data center, where speeds are equal or step down only a little; very large buffers in front of a slow access link (buffer bloat) hurt instead (p. 21).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Design (AW Ch 2)</th><th>Where you build it in this guide</th></tr></thead>
+      <tbody>
+        <tr><td>Bow tie MLAG (p. 16)</td><td>Lab D4 L2LS: the spine MLAG pair connected to each leaf MLAG pair by one port-channel (<a href="#obj-4-1">4.1</a>).</td></tr>
+        <tr><td>Layer 3 leaf-spine with ECMP (p. 16)</td><td>Lab D5 L3LS underlay with eBGP (<a href="#obj-5-1">5.1</a>).</td></tr>
+        <tr><td>Spline (p. 17)</td><td>Not built; it is the L2LS with the leaves removed and hosts on the spines.</td></tr>
+        <tr><td>VXLAN overlay (p. 17)</td><td>Lab D6 EVPN VXLAN (<a href="#obj-6-2">6.2</a>).</td></tr>
+        <tr><td>Universal spine (p. 17)</td><td>Not built; core1 and the border leaves are a small version of the external connection.</td></tr>
+      </tbody>
+    </table></div>
+    <ol class="tasks">
+      <li><p><strong>Oversubscription.</strong> A leaf has 48 ports of 25 Gbps toward servers and 6 ports of 100 Gbps toward the spines. What is its oversubscription ratio? How many spines can it use, and how many uplinks would make it non-blocking?</p></li>
+      <li><p><strong>Spec-sheet reading.</strong> A 48-port 10 Gbps switch claims a "480 Gbps" fabric. Is it non-blocking? What if the figure were "960 Gbps"?</p></li>
+      <li><p><strong>ECMP in this lab.</strong> On leaf1 (after Lab D5), show how many paths it has to leaf3's loopback and which interfaces they use. If a third spine were added, what would change in the routing table and in the capacity per leaf?</p></li>
+      <li><p><strong>Incast.</strong> Ten servers each send 5 Gbps at the same moment to one storage array on a 10 Gbps port. How much traffic must be buffered or dropped each millisecond? How long until a 12 MB buffer for that port is full?</p></li>
+      <li><p><strong>Averages.</strong> A 10 Gbps link carries a steady 1 Gbps, plus a 100 ms burst at line rate once a minute. What do a one-minute and a five-minute average show? What does the port's buffer see during each burst?</p></li>
+      <li><p><strong>Buffer drain.</strong> How long does a full 24 MB buffer take to drain onto a 10 Gbps link, and onto a 50 Mbps link? Which one is a problem, and why?</p></li>
+      <li><p><strong>HOL and VOQ.</strong> Input port 1 has a packet for output 3 (busy) at the front of its queue and packets for output 2 (idle) behind it. What happens with a single input FIFO, and what happens with VOQ?</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · the numbers</summary>
+      <ol>
+        <li>Down 48 × 25 = 1,200 Gbps, up 6 × 100 = 600 Gbps, so 2:1. Six uplinks means up to six spines (one link each). Non-blocking needs 12 × 100 Gbps of uplink.</li>
+        <li>48 × 10 Gbps is 480 Gbps in each direction, 960 Gbps counting both. If "480 Gbps" counts both directions, only 24 ports can run at line rate in and out at once, so it is 2:1 blocking; "960 Gbps" (full duplex) would be non-blocking (p. 20). Read the spec as packets per second and per direction, and ask.</li>
+        <li><code>show ip route 10.255.0.5</code> (leaf3's Loopback0 in this lab, check yours) lists two next hops, one per spine, through Ethernet1 and Ethernet2. A third spine adds a third ECMP next hop and one more uplink, so capacity per leaf grows by half and losing one spine costs a third of the capacity instead of half (p. 16).</li>
+        <li>Offered 50 Gbps, delivered 10 Gbps, so 40 Gbps is in excess: 40 Mb, which is 5 MB, every millisecond. 12 MB is full in about 2.4 ms, after which packets drop (p. 20). This is the storage case the chapter warns about (pp. 19-20).</li>
+        <li>Each burst adds 100 ms × 9 Gbps of extra data, about 0.9 Gb a minute, or about 15 Mbps on average. Both averages show about 1.015 Gbps, a calm link (pp. 19-20). During each burst the link runs at 100 percent for 100 ms, and if other ports send to the same output at the same time the buffer fills. Only LANZ, fine-grained streaming telemetry or drop counters show it (<a href="#lab-d3-lanz">Lab D3 LANZ drill</a>).</li>
+        <li>24 MB = 192 Mb. At 10 Gbps that is 19.2 ms; at 50 Mbps it is 3.84 s (p. 21). Seconds of queueing confuse TCP and make interactive traffic unusable, which is why deep buffers suit the data center and not a slow access link (p. 21).</li>
+        <li>With one FIFO, the packets for idle output 2 wait behind the blocked packet: head-of-line blocking (p. 20). With VOQ, each input has a queue per output, so the packets for output 2 leave at once and only the queue for output 3 waits (pp. 20-21).</li>
+      </ol>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Expect a short calculation or a "which design" question: oversubscription is downlink bandwidth over uplink bandwidth; leaf-spine gives equal-cost paths and one spine hop between any two leaves; averages hide microbursts, and LANZ shows them.</aside>
+    <aside class="note real"><strong>Real world.</strong> Size uplinks from the traffic pattern, not from a rule of thumb: 3:1 is common for general compute, storage and AI clusters often need 1:1. Plan the spine count for failure: with two spines, losing one halves capacity. Put storage and other incast-heavy traffic on deep-buffer platforms, and watch drop counters and LANZ rather than five-minute graphs (p. 21).</aside>
   </section>
 
   <section class="part" id="obj-4-1">
@@ -3993,6 +4186,7 @@ leaf1(config)# no vrf instance LAB</code></pre>
   <section class="part checkpoint">
     <h3>Checkpoint · Lab D4</h3>
     <ul class="checklist">
+      <li>I can read LLDP detail, control it per port, and explain Cisco LLDP and CDP interop; I can work out oversubscription, incast and buffer drain numbers.</li>
       <li>On the MST triangle I can move the MST0 root, build instances with their own roots, explain <code>P2p Boundary</code> ports, and fix a region mismatch and the pruning trap.</li>
       <li>You built and tore down an L2LS with three MLAG domains, MSTP with guards, and VARP gateways, and you can troubleshoot STP and MLAG faults from show output alone.</li>
       <li>The fabric is now routed at the link level: every /31 pings, Loopback0 exists on all six switches, spines run <code>spanning-tree mode none</code>.</li>
