@@ -274,7 +274,8 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
         <tr><td>Spine–leaf point-to-point links</td><td class="num">10.255.255.0/24, carved into /31s</td></tr>
         <tr><td>Tenant VRF / L3 VNI</td><td class="num">TENANT-A / 50001</td></tr>
         <tr><td>VLANs → VNIs</td><td class="num">10 → 10010 and 20 → 10020 (routed); 30 → 10030 (L2 only)</td></tr>
-        <tr><td>MLAG peer link / iBGP peering</td><td class="num">VLAN 4094 and VLAN 4093, 10.255.252.0/24</td></tr>
+        <tr><td>MLAG peer link (VLAN 4094)</td><td class="num">10.255.252.0/24, /31 per pair</td></tr>
+        <tr><td>MLAG iBGP (VLAN 4093; VRF TENANT-A on VLAN 3001)</td><td class="num">10.255.251.0/24, /31 per pair</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -988,13 +989,13 @@ ip load-sharing trident fields ip source-ip destination-ip
 no spanning-tree vlan-id 4093
 interface Vlan4093
    mtu 9214
-   ip address 10.255.252.2/31
+   ip address 10.255.251.0/31
 router bgp 65101
    neighbor MLAG-IPV4 peer group
    neighbor MLAG-IPV4 remote-as 65101
    neighbor MLAG-IPV4 next-hop-self
    neighbor MLAG-IPV4 send-community
-   neighbor 10.255.252.3 peer group MLAG-IPV4
+   neighbor 10.255.251.1 peer group MLAG-IPV4
    address-family ipv4
       neighbor MLAG-IPV4 activate</pre></div>
       </div>
@@ -1290,6 +1291,7 @@ interface Ethernet5
     VTEP pool          10.255.1.0/24
     P2P pool           10.255.255.0/24
     MLAG peer pool     10.255.252.0/24
+    MLAG iBGP pool     10.255.251.0/24
     VXLAN overlay      eBGP EVPN
 EVPN Services
   Tenant A
@@ -1337,6 +1339,7 @@ l3leaf:
     uplink_switches: [spine1, spine2]
     uplink_ipv4_pool: 10.255.255.0/24
     mlag_peer_ipv4_pool: 10.255.252.0/24
+    mlag_peer_l3_ipv4_pool: 10.255.251.0/24
     virtual_router_mac_address: 00:1c:73:00:00:99
   node_groups:
     - group: PAIR1
