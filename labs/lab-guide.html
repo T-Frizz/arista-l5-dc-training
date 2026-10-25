@@ -953,6 +953,27 @@ leaf1# delete flash:EOS-4.34.3M.swi</code></pre>
     <aside class="note real"><strong>Real world.</strong> The CloudVision UI changes between releases (menu names move, Network Provisioning is being replaced by Studios). The concepts do not: a designed config per device, a diff against running, a change control with approvals and rollback. Learn the concept, then find the button.</aside>
   </section>
 
+  <section class="part" id="lab-d2-evpn101">
+    <h3>Using the "EVPN VXLAN 101" CloudVision lab</h3>
+    <p>If you have a time-boxed CloudVision lab such as WWT's <a href="https://www.wwt.com/lab/arista-evpn-vxlan101-lab" target="_blank" rel="noopener">Arista EVPN VXLAN 101 lab</a>, use it as Path A for this domain. Going by WWT's public description, it is about 8 hours of work in 10 labs on vEOS switches with CloudVision Portal, Cloudbuilder and IPAM. You build each part of the fabric as configlets and push them through CloudVision: underlay, MLAG, EVPN overlay, L2 VXLAN, external L3, asymmetric and then symmetric IRB, VRFs, a troubleshooting lab, and a CloudVision deep dive (upgrades, backups, maintenance, telemetry). It does not mention Studios. Your copy may differ, so check the lab's own guide.</p>
+    <p>Don't just follow its steps. At every push, also do the exam task in the right-hand column. That turns 8 hours of building into Operations practice.</p>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>EVPN VXLAN 101 lab</th><th>Our objectives</th><th>Extra exam practice while you are there</th></tr></thead>
+      <tbody>
+        <tr><td>Intro and first login</td><td><a href="#obj-2-1">2.1</a></td><td>Find each device in Inventory and open its overview. On one vEOS, check <code>show daemon TerminAttr</code> and the TerminAttr config. Note the CloudVision version and where Provisioning, Change Control, Events and Compliance live in this release.</td></tr>
+        <tr><td>Lab 1 underlay, Lab 2 MLAG</td><td><a href="#obj-2-2">2.2</a>, <a href="#obj-5-1">5.1</a>, <a href="#obj-4-1">4.1</a></td><td>Build each configlet yourself, attach one to a container and one to a single device, and read the designed vs running diff before you save. Group the tasks into one change control, review it, approve it and execute it. Compare your configlet with our AVD config for the same feature in <code>labs/avd/intended/configs</code>.</td></tr>
+        <tr><td>Labs 3 and 4 EVPN overlay, L2 VXLAN</td><td><a href="#obj-2-2">2.2</a>, <a href="#obj-6-2">6.2</a></td><td>After one change control, roll it back from the Change Control page, check the device is back where it was, then roll forward again. That is a common Operations task.</td></tr>
+        <tr><td>Lab 5 external L3</td><td><a href="#obj-6-2">6.2</a></td><td>Matches our border leaves and core1. Before you push, take a snapshot or record the routing table, then compare after.</td></tr>
+        <tr><td>Labs 6 and 7 asymmetric, then symmetric IRB</td><td><a href="#obj-6-2">6.2</a>, <a href="#lab-d6-asym">Lab D6 Part D</a></td><td>Our main build uses symmetric IRB, and Lab D6 Part D covers asymmetric. Use the move from one to the other to practise a change control with several devices and a planned order.</td></tr>
+        <tr><td>Lab 8 multi-tenancy</td><td><a href="#obj-6-2">6.2</a></td><td>Make a CLI-only change on one switch (for example an interface description), find it as out of compliance, and practise both answers: reconcile it into a configlet, or push the designed config to remove it.</td></tr>
+        <tr><td>Lab 9 troubleshooting</td><td><a href="#obj-3-4">3.4</a>, <a href="#lab-d3-method">method</a></td><td>Time yourself. Work each fault with the method from Lab D3: CloudVision events and the config compare view first, then the CLI.</td></tr>
+        <tr><td>Lab 10 upgrades, backups, maintenance, telemetry</td><td><a href="#obj-1-2">1.2</a>, <a href="#obj-2-2">2.2</a>, <a href="#obj-3-2">3.2</a></td><td>Build an image bundle and upgrade one MLAG peer at a time. Put a switch into maintenance and watch BGP drain. Build a dashboard and find a device's events. Add an <code>on-maintenance</code> event handler first and check it fired (<a href="#lab-d3-evmgr">Event Manager drill</a>).</td></tr>
+      </tbody>
+    </table></div>
+    <aside class="note warn"><strong>Watch out.</strong> This lab covers configlets (Network Provisioning), not Studios. Objective <a href="#obj-2-3">2.3</a> (workspaces, tags, the static configuration studio, Software Management) still needs ATD, the Academy lab or Path B. Cloudbuilder and IPAM are add-ons that generate configlets and addresses. Learn what they produce, not their menus.</aside>
+    <aside class="note exam"><strong>Exam tip.</strong> Access is time-boxed, so plan it. One way to fit 5 days: day 1 Labs 1-2, day 2 Labs 3-5, day 3 Labs 6-8, day 4 Lab 9 against the clock, day 5 Lab 10 and a second pass through change control and rollback. Keep a page of notes with every menu path you used; the exam allows open book, and finding a button fast saves real minutes.</aside>
+  </section>
+
   <section class="part" id="obj-2-1">
     <h3><span class="obj">2.1</span> CloudVision overview, setup and onboarding</h3>
     <p>Your manager asks whether to buy on-prem CVP or CVaaS, how big a cluster to run, and how to back it up. Then you onboard the six fabric switches.</p>
@@ -1428,6 +1449,111 @@ leaf1# more flash:uplink-1792926008.txt</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d3-evmgr">
+    <h3>Event Manager deep dive (optional)</h3>
+    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/66%5B%3Bvnd.vst.idref%3Dchapter-idm45591786609816%5D!/4/2/2%5Bevent_manager%5D" target="_blank" rel="noopener">AW Ch 27 · Event Manager</a> (pp. 143-148) and builds on objective 3.1 above. Event handlers are named in objective 3.1, so expect them on the Operations exam, even if only as one task. Everything here runs on cEOS.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> A handler is a <em>trigger</em> plus an <em>action</em>, with an optional <em>delay</em> between them (p. 143). The feature is called Event Manager, but the commands say <code>event-handler</code>. Triggers include <code>on-boot</code>, <code>on-counters</code>, <code>on-intf</code> (with <code>ip</code>, <code>ip6</code> and <code>operstatus</code>), <code>on-logging</code>, <code>on-maintenance</code>, <code>on-startup-config</code> and <code>vm-tracer</code>. When an <code>on-intf</code> action runs, EOS passes it variables such as <code>$INTF</code> and <code>$OPERSTATE</code>, plus the interface's IP addresses (p. 145). A handler becomes active only when you leave its config mode, and leaving the mode can fire it straight away (pp. 143, 146). EOS accepts any action text without checking it, so a broken action only shows up when it runs and fails (p. 146). <code>on-startup-config</code> fires on <code>write memory</code> or <code>copy running-config startup-config</code>, but not when someone edits the file from bash (pp. 145, 147).</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, count how many counters the <code>on-counters</code> trigger can use, then list only the CPU idle counters. Hardware switches list thousands of counters, and the list depends on the ASIC and EOS release (p. 143). cEOS will show far fewer.</p></li>
+      <li><p>Create handler <code>ET5-STATE</code> for leaf1 <code>Ethernet5</code> (host1). On any operational state change it should log <code>$INTF is now $OPERSTATE</code> to syslog. Add a multi-line comment saying what it is for and who added it. Flap the port and find the log line.</p></li>
+      <li><p>Create handler <code>CFG-BACKUP</code> with an <code>on-startup-config</code> trigger. It should run a script on flash that copies startup-config to <code>/mnt/flash/cfg-backup/</code> with a timestamp in the name and keeps only the newest 10 copies.</p></li>
+      <li><p>Run <code>write memory</code> five times as fast as you can and count the backup files. Set <code>delay 0</code> on the handler, repeat, and count again. Explain the difference.</p></li>
+      <li><p>Create handler <code>BROKEN</code> on <code>on-intf Ethernet5 operstatus</code> with the action <code>email -s "$INTF is $OPERSTATE"</code> (no recipient, no mail server). Flap the port, find the failure in the log, and use <code>show event-handler BROKEN</code> to work out what went wrong. Then fix the handler so it logs instead.</p></li>
+      <li><p>Build a CPU alarm <code>CPU-HIGH</code> with <code>on-counters</code>: poll every 5 seconds and fire when a CPU idle counter drops below 20, but only if that happens 2 times within 20 seconds. Log a warning when it fires. Put some load on the container and see whether it fires.</p></li>
+      <li><p>Show all handlers, including any built-in ones, and read the trigger and action counters for each.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · counters, interface handler, comment</summary>
+      <pre class="cli"><code>leaf1# show event-handler trigger counters | wc -l
+leaf1# show event-handler trigger counters | grep -i idle
+
+leaf1(config)# event-handler ET5-STATE
+leaf1(config-handler-ET5-STATE)# comment
+Enter TEXT message. Type 'EOF' on its own line to end.
+Log host1 link changes on leaf1 Et5
+Added for lab D3 by student
+EOF
+leaf1(config-handler-ET5-STATE)# trigger on-intf Ethernet5 operstatus
+leaf1(config-handler-ET5-STATE)# action bash logger -t ET5 "$INTF is now $OPERSTATE"
+leaf1(config-handler-ET5-STATE)# delay 2
+leaf1(config-handler-ET5-STATE)# exit
+
+leaf1(config)# interface Ethernet5
+leaf1(config-if-Et5)# shutdown
+leaf1(config-if-Et5)# no shutdown
+leaf1# show logging last 2 minutes | include ET5|EVENT</code></pre>
+      <p>Leaving the handler mode can produce one activation before you flap anything. That is the "fires on exit" behaviour from the chapter, not a mistake in your handler.</p>
+    </details>
+    <details class="solution"><summary>Solution · config backup on every write</summary>
+      <pre class="cli"><code>leaf1# bash
+[admin@leaf1 ~]$ cat &gt; /mnt/flash/cfg-backup.sh &lt;&lt;'END'
+#!/bin/bash
+# Save a timestamped copy of startup-config and keep the newest 10
+DIR=/mnt/flash/cfg-backup
+mkdir -p "$DIR"
+cp /mnt/flash/startup-config "$DIR/startup-config_$(date +%Y%m%d-%H%M%S)"
+ls -1t "$DIR"/startup-config_* | tail -n +11 | xargs -r rm -f
+END
+[admin@leaf1 ~]$ chmod +x /mnt/flash/cfg-backup.sh
+[admin@leaf1 ~]$ /mnt/flash/cfg-backup.sh &amp;&amp; ls /mnt/flash/cfg-backup/
+[admin@leaf1 ~]$ exit
+
+leaf1(config)# event-handler CFG-BACKUP
+leaf1(config-handler-CFG-BACKUP)# trigger on-startup-config
+leaf1(config-handler-CFG-BACKUP)# action bash /mnt/flash/cfg-backup.sh
+leaf1(config-handler-CFG-BACKUP)# exit
+
+leaf1# write memory
+! repeat quickly 5 times, then:
+leaf1# bash ls -l /mnt/flash/cfg-backup/
+
+leaf1(config)# event-handler CFG-BACKUP
+leaf1(config-handler-CFG-BACKUP)# delay 0
+leaf1(config-handler-CFG-BACKUP)# exit
+! 5 fast writes again, then count the files</code></pre>
+      <p>With the default delay, writes that land close together are handled as one trigger, so you get fewer files than writes. With <code>delay 0</code> each write gets its own run (pp. 146-147). Files named to the second can still overwrite each other on very fast writes. The <code>tail -n +11</code> line is the rotation that stops a busy operator from filling flash, which the book warns about (p. 147). The book also points out that AAA command accounting is the better tool for tracking who changed what. This handler is a cheap extra that gives you a usable config after every save.</p>
+    </details>
+    <details class="solution"><summary>Solution · finding a broken action</summary>
+      <pre class="cli"><code>leaf1# show logging last 5 minutes | include EVENT
+! look for SYS-6-EVENT_TRIGGERED followed by SYS-5-EVENT_ACTION_FAILED ... exit code N
+leaf1# show event-handler BROKEN
+! Trigger Detections and Activations go up; the Action line shows exactly what ran
+leaf1# bash email -s "test"
+! run the action by hand to see the real error
+
+leaf1(config)# event-handler BROKEN
+leaf1(config-handler-BROKEN)# action bash logger -t BROKEN "$INTF is $OPERSTATE"
+leaf1(config-handler-BROKEN)# exit</code></pre>
+      <p>The book's version of this mistake is an email action with no recipient address (p. 146). The method is what matters: the log tells you the action failed and its exit code, <code>show event-handler</code> shows the exact command, and running that command by hand from <code>bash</code> shows the real error. Exit code 126 usually means a script is not executable, and 127 means the command was not found.</p>
+    </details>
+    <details class="solution"><summary>Solution · CPU alarm with on-counters</summary>
+      <pre class="cli"><code>leaf1(config)# event-handler CPU-HIGH
+leaf1(config-handler-CPU-HIGH)# trigger on-counters
+leaf1(config-handler-CPU-HIGH-counters)# poll interval 5
+leaf1(config-handler-CPU-HIGH-counters)# condition tcollector.proc.stat.cpu.type=idle &lt; 20
+leaf1(config-handler-CPU-HIGH-counters)# action bash logger -p local4.warning -t CPU "CPU idle below 20 percent"
+leaf1(config-handler-CPU-HIGH-counters)# threshold 20 count 2
+leaf1(config-handler-CPU-HIGH-counters)# exit
+
+! load: two busy loops for 30 s
+leaf1# bash timeout 30 sh -c 'yes &gt; /dev/null &amp; yes &gt; /dev/null &amp; wait'
+leaf1# show event-handler CPU-HIGH</code></pre>
+      <p>Use a counter name from your own <code>grep idle</code> output; the name above shows the pattern, not a promise. The chapter also shows a second style, where the condition is the output of a bash command (<code>condition bashCmd."..." &gt; 80</code>) that works out CPU use from <code>vmstat</code> (p. 146). A container shares the host's CPUs, so two busy loops may not push idle below 20. If it never fires, raise the threshold to test the plumbing. In production, CPU alarms belong in CloudVision, as the book says.</p>
+    </details>
+    <details class="solution"><summary>Solution · status of every handler</summary>
+      <pre class="cli"><code>leaf1# show event-handler
+leaf1# show event-handler CFG-BACKUP</code></pre>
+      <p>Hardware switches often have a built-in handler that watches drop counters (the book shows <code>DropCountersHandler</code> marked BUILT-IN, pp. 147-148). Read Total Trigger Detections, Total Trigger Activations and Total Actions: detections without activations mean the threshold or delay held it back, and activations followed by EVENT_ACTION_FAILED logs mean the action is broken.</p>
+    </details>
+    <aside class="note real"><strong>Real world · coming from Cisco EEM.</strong> The ideas map closely. An EEM applet is an <code>event-handler</code>. <code>event syslog pattern</code> is <code>trigger on-logging</code> with a <code>regex</code>. Interface and tracking events are <code>trigger on-intf</code>. EEM timer and cron events are best done with the CLI <code>schedule</code> command (objective 3.1). <code>action cli command</code> becomes <code>FastCli -p 15 -c "..."</code> inside a bash action, and <code>action syslog msg</code> becomes <code>logger</code>. EEM Tcl policies become bash or Python scripts on flash. The big difference is that EOS actions are Linux commands, so you get the full shell (files, <code>curl</code>, Python) instead of a fixed action list.</aside>
+    <div class="breakfix"><p class="label">Break / fix</p>
+      <p>Inject (leaf2): create <code>/mnt/flash/cfg-backup.sh</code> as in the solution but skip the <code>chmod +x</code>, then add handler <code>CFG-BACKUP</code> with <code>trigger on-startup-config</code> and <code>action bash /mnt/flash/cfg-backup.sh</code>. Run <code>write memory</code>.</p>
+      <p>Symptom: no backup files appear, and the log shows the handler triggered and then failed.</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>The script is not executable, so bash refuses to run it (exit code 126 in the failure message). Fix it with <code>bash chmod +x /mnt/flash/cfg-backup.sh</code>, or change the action to <code>action bash bash /mnt/flash/cfg-backup.sh</code>. Run <code>write memory</code> again and check <code>/mnt/flash/cfg-backup/</code>.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="obj-3-2">
     <h3><span class="obj">3.2</span> Monitoring with CloudVision: dashboards, events, compliance, endpoint search, topology</h3>
     <p>With the fabric streaming to CloudVision, the NOC wants a POD_A dashboard, an alert when any uplink drops, a daily compliance check, and the ability to find any server in seconds.</p>
@@ -1825,6 +1951,7 @@ host$ anta nrfu -u admin -p admin --insecure -i anta-inventory.yml \
       <li>I can build a CloudVision dashboard, find and acknowledge events, check compliance and locate an endpoint (or do the CLI equivalents).</li>
       <li>I can configure SNMP v2c with an ACL and SNMPv3 authPriv, and sFlow, and test both from a collector.</li>
       <li>I can mirror a port to the CPU and capture with tcpdump, and explain LANZ and TAP aggregation.</li>
+      <li>I can find a failed event handler action from the log and <code>show event-handler</code>, and back up the config on every write.</li>
       <li>I can read a VXLAN capture and explain an MTU failure with the 50-byte overhead.</li>
       <li>I follow the troubleshooting method and fixed all three tickets with one change each.</li>
       <li>All injected faults and test configs (event handlers on leaf2, mirror sessions, SNMP test changes) are removed or intended, and <code>show running-config diffs</code> shows only what I mean to keep.</li>
