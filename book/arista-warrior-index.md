@@ -19,3 +19,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 28 | Introduction to EOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/28%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633624%5D!/4/2/2%5Bintroduction_to_eos%5D) |
 | 30 | Configuration Management | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/30%5B%3Bvnd.vst.idref%3Dchapter-idm45591790633000%5D!/4/2/2%5Bconfiguration_management%5D) |
 | 32 | Upgrading EOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/32%5B%3Bvnd.vst.idref%3Dchapter-idm45591789973048%5D!/4/2/2%5Bupgrading_eos%5D) |
+| 34 | Link Layer Discovery Protocol | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/34%5B%3Bvnd.vst.idref%3Dchapter-idm45591789862360%5D!/4/2/2%5Blink_layer_discovery_protocol%5D) |
