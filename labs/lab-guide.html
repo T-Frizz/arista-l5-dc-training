@@ -4726,6 +4726,155 @@ Last hit:           2 seconds ago</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d7-eapi">
+    <h3>eAPI beyond the basics</h3>
+    <p>This drill follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/72%5B%3Bvnd.vst.idref%3Dchapter-idm45591785781384%5D!/4/2/2%5Beapi%5D" target="_blank" rel="noopener">AW Ch 30 · eAPI</a> (pp. 162-173) and adds what Path B of objective 7.1 does not cover: the Explorer, the eAPI transport options, privilege and interactive commands, a fabric-wide inventory loop, text-mode config backups, certificates, and eAPI in a VRF. The book's scripts use Python 2 and <code>jsonrpclib</code>; everything here is Python 3 with <code>requests</code>, or plain <code>curl</code>.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Before APIs, automation meant <em>expect scripting</em> (send a command, wait for a prompt) and <em>screen scraping</em> (cut fields out of text), and both break as soon as a prompt or an output line changes (pp. 162-164). eAPI returns JSON, so you read <code>response[0]["version"]</code> by key, not by position (pp. 164-166). <code>show ... | json</code> on the CLI shows you the same keys, and key names are case-sensitive camelCase (p. 170). eAPI is configured under <code>management api http-commands</code>: HTTPS by default, with <code>http</code>, <code>http localhost</code> (port 8080) and <code>unix-socket</code> as other transports; the local transports need no username (pp. 166-167). The result is a list with one entry per command, in order. Interactive commands are not allowed, which is why scripts use <code>reload now</code> rather than <code>reload</code>, and <code>enable</code> can take its password as <code>{"cmd": "enable", "input": "..."}</code> (pp. 171-172). If the management interface is in a VRF, eAPI must be enabled in that VRF too, or you get "connection refused" (p. 167). CloudVision Portal also talks to switches through eAPI (p. 173).</aside>
+    <ol class="tasks">
+      <li><p>Open the eAPI Explorer on leaf1 in a browser (<code>https://172.100.100.21/explorer</code>). Run <code>show version</code> in the Simple Request tab and compare the Request Viewer with your <code>showver.json</code> from 7.1. Then run the "print switch address" example in the Script Editor and open the Command Documentation tab.</p></li>
+      <li><p>On leaf1, read <code>show management api http-commands</code> and note the enabled transports, the VRFs, the URLs, and the per-user hit counters.</p></li>
+      <li><p>Write <code>inventory.py</code>: one eAPI call per node for all nine EOS nodes (spines, leaves, hosts, core1), printing a table of name, model, system MAC and EOS version, and marking any node that does not answer.</p></li>
+      <li><p>Send <code>["configure", "interface Ethernet5", "description set-by-eapi"]</code> to leaf2 without <code>enable</code>. Read the error, then fix the call. Also explain why <code>reload</code> cannot be sent through eAPI while <code>reload now</code> can (do not run either).</p></li>
+      <li><p>Write <code>backup.py</code>: save every switch's running config as text to <code>backups/&lt;name&gt;-&lt;timestamp&gt;.cfg</code>.</p></li>
+      <li><p>On leaf1, enable the local transports and call eAPI from bash on the switch with no username: once over the Unix socket and once over <code>http localhost</code>. Then remove them again.</p></li>
+      <li><p>Run the inventory script without <code>verify=False</code>, read the certificate error, and list three ways to fix it.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · Explorer and status</summary>
+      <p>Log in with admin/admin and accept the self-signed certificate warning. The Simple Request tab builds the same JSON-RPC body you wrote by hand (<code>"method": "runCmds"</code>, <code>"version": 1</code>, <code>"format": "json"</code>, <code>"cmds": [...]</code>), and the Response Viewer shows the <code>result</code> list. The Explorer sends real requests, so a configuration command typed there changes the switch (p. 168). The Script Editor runs JavaScript against the same API, and Command Documentation is the built-in reference for every command's JSON model, which is the fastest way to find a key name (p. 168).</p>
+      <pre class="cli"><code>leaf1# show management api http-commands</code></pre>
+      <pre class="out"><code>Enabled:            Yes
+HTTPS server:       running, set to use port 443
+HTTP server:        shutdown, set to use port 80
+Local HTTP server:  shutdown, no authentication, set to use port 8080
+Unix Socket server: shutdown, no authentication
+VRFs:               default
+Hits:               143
+...
+   User        Requests       Bytes in       Bytes out    Last hit
+----------- -------------- -------------- --------------- ------------
+   admin        143            21844          1904322     4 seconds ago
+
+URLs
+-----------------------------------------
+Management0 : https://172.100.100.21:443</code></pre>
+      <p>Representative output. The per-user table is a quick way to see which account a script or tool is really using.</p>
+    </details>
+    <details class="solution"><summary>Solution · inventory.py</summary>
+      <pre class="cli"><code>#!/usr/bin/env python3
+"""inventory.py - model, MAC and EOS version of every node, via eAPI."""
+import requests, urllib3
+
+urllib3.disable_warnings()          # lab only: self-signed certificates
+NODES = {"spine1": "172.100.100.11", "spine2": "172.100.100.12",
+         "leaf1": "172.100.100.21", "leaf2": "172.100.100.22",
+         "leaf3": "172.100.100.23", "leaf4": "172.100.100.24",
+         "host1": "172.100.100.31", "host2": "172.100.100.32",
+         "core1": "172.100.100.41"}
+
+def eapi(host, cmds, fmt="json"):
+    body = {"jsonrpc": "2.0", "method": "runCmds", "id": 1,
+            "params": {"version": 1, "format": fmt, "cmds": cmds}}
+    r = requests.post(f"https://{host}/command-api", json=body,
+                      auth=("admin", "admin"), verify=False, timeout=5)
+    reply = r.json()
+    if "error" in reply:
+        raise RuntimeError(reply["error"]["message"])
+    return reply["result"]
+
+print(f"{'Node':8} {'Model':12} {'System MAC':19} Version")
+print("-" * 50)
+for name, ip in NODES.items():
+    try:
+        v = eapi(ip, ["show version"])[0]
+    except Exception as exc:
+        print(f"{name:8} UNREACHABLE  {exc.__class__.__name__}")
+        continue
+    print(f"{name:8} {v['modelName']:12} {v['systemMacAddress']:19} {v['version']}")</code></pre>
+      <pre class="out"><code>Node     Model        System MAC          Version
+--------------------------------------------------
+spine1   cEOSLab      00:1c:73:11:00:00   4.34.2F
+spine2   cEOSLab      00:1c:73:12:00:00   4.34.2F
+leaf1    cEOSLab      00:1c:73:21:00:00   4.34.2F
+...
+core1    cEOSLab      00:1c:73:41:00:00   4.34.2F</code></pre>
+      <p>This is the book's ten-switch loop (pp. 170-171) in Python 3: a dictionary of nodes instead of building IP strings, f-strings instead of <code>ljust</code>, and an exception handler so one dead switch does not stop the report. Add <code>show hostname</code> to the same call if you want the switch to name itself; then read <code>result[1]["hostname"]</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · privilege and interactive commands</summary>
+      <pre class="cli"><code>&gt;&gt;&gt; eapi("172.100.100.22", ["configure", "interface Ethernet5", "description set-by-eapi"])
+RuntimeError: CLI command 1 of 3 'configure' failed: invalid command
+&gt;&gt;&gt; eapi("172.100.100.22", ["enable", "configure", "interface Ethernet5", "description set-by-eapi"])
+[{}, {}, {}, {}]
+! with an enable secret configured:
+&gt;&gt;&gt; eapi("172.100.100.22", [{"cmd": "enable", "input": "EnableSecret"}, "configure", ...])</code></pre>
+      <p>An eAPI session starts in unprivileged exec mode, where <code>configure</code> does not exist, so EOS calls it an invalid command (error code 1002) (p. 171). Put <code>enable</code> first. Commands that print nothing return an empty dictionary each, so four commands give <code>[{}, {}, {}, {}]</code>, and a warning comes back in a <code>messages</code> key without failing the call (p. 172). eAPI cannot answer prompts: <code>reload</code> asks for confirmation and would hang, while <code>reload now</code> does not ask. Avoid <code>top</code>, <code>watch</code> and anything else that waits for input (p. 172). Undo the description afterwards, or better, make the change in a configuration session as in 7.1.</p>
+    </details>
+    <details class="solution"><summary>Solution · backup.py</summary>
+      <pre class="cli"><code>#!/usr/bin/env python3
+"""backup.py - text running-config of every switch, timestamped."""
+from datetime import datetime
+from pathlib import Path
+from inventory import NODES, eapi     # reuse the helper and the node list
+
+out = Path("backups"); out.mkdir(exist_ok=True)
+stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+for name, ip in NODES.items():
+    try:
+        res = eapi(ip, ["enable", "show running-config"], fmt="text")
+    except Exception as exc:
+        print(f"{name}: FAILED {exc}")
+        continue
+    path = out / f"{name}-{stamp}.cfg"
+    path.write_text(res[1]["output"])
+    print(f"{name}: {path} ({len(res[1]['output'])} bytes)")</code></pre>
+      <p>Move the table-printing loop in <code>inventory.py</code> under <code>if __name__ == "__main__":</code> first, so importing it does not print the table. In text mode every result is still a dictionary in a list, with the text under the <code>output</code> key, and the config is in element 1 because <code>enable</code> is element 0 (p. 172). Text is the right format for a backup because you can feed it straight back with <code>configure replace</code>; the JSON form of the running config cannot be pushed back (p. 172).</p>
+    </details>
+    <details class="solution"><summary>Solution · on-box transports</summary>
+      <pre class="cli"><code>leaf1(config)# management api http-commands
+leaf1(config-mgmt-api-http-cmds)# protocol unix-socket
+leaf1(config-mgmt-api-http-cmds)# protocol http localhost
+leaf1(config-mgmt-api-http-cmds)# exit
+leaf1# show management api http-commands | include Local|Unix
+
+leaf1# bash
+[admin@leaf1 ~]$ BODY='{"jsonrpc":"2.0","method":"runCmds","id":1,"params":{"version":1,"cmds":["show version"]}}'
+[admin@leaf1 ~]$ curl -s --unix-socket /var/run/command-api.sock -d "$BODY" http://localhost/command-api | head -c 300; echo
+[admin@leaf1 ~]$ curl -s -d "$BODY" http://localhost:8080/command-api | head -c 300; echo
+[admin@leaf1 ~]$ exit
+
+leaf1(config)# management api http-commands
+leaf1(config-mgmt-api-http-cmds)# no protocol unix-socket
+leaf1(config-mgmt-api-http-cmds)# no protocol http localhost</code></pre>
+      <p>Neither call needs a username, because only code already running on the switch can reach them (p. 167). That is what on-box scripts and event handler actions should use: no stored password, and no certificate problems. The socket path matches the <code>unix:/var/run/command-api.sock</code> URL that <code>show management api http-commands</code> lists (p. 167). The last two lines put leaf1 back to its designed config.</p>
+    </details>
+    <details class="solution"><summary>Solution · certificate errors</summary>
+      <p>Without <code>verify=False</code>, <code>requests</code> raises an <code>SSLError</code> ending in <code>CERTIFICATE_VERIFY_FAILED</code>, because EOS uses a self-signed certificate by default. The book hit the same error when the Python on EOS started checking certificates (p. 168). The fixes, from best to worst:</p>
+      <ul>
+        <li>Give eAPI a certificate signed by a CA your scripts trust: an SSL profile under <code>management security</code>, attached with <code>protocol https ssl profile NAME</code> under <code>management api http-commands</code> (check the exact syntax with <code>?</code> on your release). Then pass the CA bundle with <code>verify="/path/ca.pem"</code>.</li>
+        <li>For scripts that run on the switch itself, use the Unix socket or <code>http localhost</code>, which skip TLS entirely.</li>
+        <li>Turn off verification (<code>verify=False</code>, or <code>ssl._create_unverified_context()</code> in plain Python). Fine in this lab, but on a real network it lets anyone in the path read the password.</li>
+      </ul>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> When a script fails, read the JSON-RPC <code>error</code> object before anything else: it names the command number and the EOS error ("CLI command 1 of 3 'configure' failed: invalid command"). Errors 1002 and 1003 usually mean a missing <code>enable</code>, a typo, or a command that does not exist on that platform. Run the same command on the CLI with <code>| json</code> to check it and to see the key names.</aside>
+    <aside class="note real"><strong>Real world.</strong> The book warns that an open eAPI with a well-known username lets anyone with a five-line script reboot your switches (p. 171). Use per-person accounts or AAA (eAPI honours TACACS+ authorization and accounting), put eAPI in the management VRF only, and add an ACL under <code>vrf MGMT</code> in <code>management api http-commands</code> so only your automation hosts can reach it (p. 167). Libraries such as <code>pyeapi</code>, Ansible's <code>arista.eos</code> collection, ANTA and AVD's <code>eos_config_deploy_eapi</code> all sit on this same API.</aside>
+    <div class="breakfix"><p class="label">Break / fix · eAPI in a VRF</p>
+      <p>Inject (host1, from <code>docker exec -it clab-l5dc-host1 Cli</code>, since you will lose SSH):</p>
+      <pre class="cli"><code>host1(config)# vrf instance MGMT
+host1(config)# interface Management0
+host1(config-if-Ma0)# vrf MGMT
+host1(config-if-Ma0)# ip address 172.100.100.31/24
+host1(config)# no ip route 0.0.0.0/0 172.100.100.1
+host1(config)# ip route vrf MGMT 0.0.0.0/0 172.100.100.1</code></pre>
+      <p>Symptom: <code>ping 172.100.100.31</code> works from your workstation, but <code>inventory.py</code> reports host1 as unreachable with a connection refused error, and <code>curl -k https://172.100.100.31/command-api</code> says "Connection refused".</p>
+      <details class="solution"><summary>Root cause and fix</summary>
+        <p>Moving Management0 into a VRF moves the address, but eAPI is still only listening in VRF <code>default</code>, so nothing answers on port 443 in VRF MGMT (p. 167). <code>show management api http-commands</code> shows <code>VRFs: default</code>. Fix:</p>
+        <pre class="cli"><code>host1(config)# management api http-commands
+host1(config-mgmt-api-http-cmds)# vrf MGMT
+host1(config-mgmt-api-http-cmds-vrf-MGMT)# no shutdown</code></pre>
+        <p>Re-run <code>inventory.py</code>. Remember that SSH, NTP, DNS and TerminAttr all need the same VRF treatment (AVD does this with <code>mgmt_interface_vrf</code>). Undo the change afterwards with <code>configure replace flash:startup-config</code> from the container console.</p>
+      </details>
+    </div>
+  </section>
+
   <section class="part" id="obj-7-2">
     <h3><span class="obj">7.2</span> CloudVision Studios engineering: the L3LS EVPN fabric</h3>
     <p>Studios replace hand-written configlets with forms. You describe the fabric (which devices, which roles, which pools and ASNs), the services (tenants, VRFs, VLANs) and the host ports; the studios render the EOS configuration. All edits happen inside a <em>workspace</em>, which you build, review and submit; submitting creates a change control. The fabric studio is built on the same data model as AVD (7.3), which is why the inputs feel familiar once you have done 7.3: Studios are a UI over a design data model, not a configlet editor.</p>
@@ -5124,6 +5273,7 @@ Router identifier 10.255.0.3, local AS number 65101
       <li>I can explain designed vs running configuration, configlet merge order, reconcile, tasks and change control, and I have pushed a change through a change control at least once (Path A).</li>
       <li>I can lay out a configlet hierarchy so that a pod-level or tenant-level change touches exactly one configlet, and I know why per-pod ASNs break a fabric-wide services configlet.</li>
       <li>I can call eAPI with curl and Python, parse the JSON, and push an atomic change with a configuration session (and <code>commit timer</code>).</li>
+      <li>I can loop a script over every node, send privileged commands with <code>enable</code>, back up configs in text mode, use the on-box transports, and fix eAPI when the management interface moves into a VRF.</li>
       <li>I have built the fabric in the L3 Leaf-Spine Fabric, EVPN Services and Interface Configuration studios, or I can describe each input and its AVD equivalent.</li>
       <li>I can build the fabric with pyavd or Ansible, deploy it with a full replace, run ANTA with the generated catalogs, and make a Day-2 change only through the data model.</li>
     </ul>
