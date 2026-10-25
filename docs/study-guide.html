@@ -200,8 +200,9 @@ footer .wrap{padding-block:20px 40px;display:grid;gap:6px}
         <li><a href="#walk"><span class="dn">R1</span><span>EVPN packet walk</span><span></span></a></li>
         <li><a href="#tshoot"><span class="dn">R2</span><span>Troubleshooting ladder</span><span></span></a></li>
         <li><a href="#cheat"><span class="dn">R3</span><span>Show-command sheet</span><span></span></a></li>
-        <li><a href="#containers"><span class="dn">R4</span><span>cEOS, vEOS and VMs (real world)</span><span></span></a></li>
-        <li><a href="#sources"><span class="dn">R5</span><span>Sources</span><span></span></a></li>
+        <li><a href="#gotchas"><span class="dn">R4</span><span>EOS gotchas for Cisco people</span><span></span></a></li>
+        <li><a href="#containers"><span class="dn">R5</span><span>cEOS, vEOS and VMs (real world)</span><span></span></a></li>
+        <li><a href="#sources"><span class="dn">R6</span><span>Sources</span><span></span></a></li>
       </ol>
     </div>
   </nav>
@@ -1545,7 +1546,7 @@ EVPN Services
           <li>Nothing interactive: no <code>top</code>, no <code>watch</code>, no "are you sure?" prompts. Use <code>reload now</code>, not <code>reload</code>. <span class="pg">AW 30 p.172</span></li>
           <li><code>"format": "text"</code> returns the CLI text instead, still one dict per command, under <code>result[i]["output"]</code>. Handy for saving <code>show running-config</code> to a file. <span class="pg">AW 30 p.172</span></li>
           <li>The <code>/explorer</code> page on the switch builds and sends real requests (so config you send applies), shows the JSON, has a JavaScript script editor and the full command docs. Scripts post to <code>/command-api</code>. <span class="pg">AW 30 p.167–168</span></li>
-          <li>The lab topology for this guide is cEOS in containerlab, and a containerlab copy of production is the usual way to test AVD changes before they ship. See <a href="#containers">R4 Containers</a>. <span class="pg">AW 31</span></li>
+          <li>The lab topology for this guide is cEOS in containerlab, and a containerlab copy of production is the usual way to test AVD changes before they ship. See <a href="#containers">R5 cEOS, vEOS and VMs</a>. <span class="pg">AW 31</span></li>
           <li>Inventory groups map to roles: <code>FABRIC</code> &gt; <code>DC1</code> &gt; <code>DC1_SPINES</code>, <code>DC1_L3_LEAVES</code>, plus <code>NETWORK_SERVICES</code> and <code>CONNECTED_ENDPOINTS</code>.</li>
         </ul></div>
         <div class="part"><h4>AVD inputs (DC1.yml, trimmed)</h4>
@@ -1648,7 +1649,7 @@ print(node.enable("show version")[0]["result"]["version"])</pre></div>
   <div class="practice"><h3>Practice: D7</h3>
     <details class="q"><summary>You need hostname and Loopback0 to differ per device but the BGP template to be shared. How do you lay out configlets?</summary><div class="a"><p>Shared BGP template on the Leaf container; a device configlet (or a configlet builder) per leaf for hostname, router-id, loopbacks and ASN.</p></div></details>
     <details class="q"><summary>eAPI works from the switch's bash but a remote script gets "connection refused". Management1 is in VRF MGMT. Fix?</summary><div class="a"><p>Add <code>vrf MGMT</code> with <code>no shutdown</code> under <code>management api http-commands</code> (optionally an <code>ip access-group</code>). Check <code>show management api http-commands</code> for the VRF list.</p></div></details>
-    <details class="q"><summary>You send <code>["enable", "show version"]</code>. Where is the version?</summary><div class="a"><p><code>result[1]["version"]</code>. One dict per command in order; <code>enable</code> is <code>result[0]</code> (empty).</p></div></details>
+    <details class="q"><summary><span>You send <code>["enable", "show version"]</code>. Where is the version?</span></summary><div class="a"><p><code>result[1]["version"]</code>. One dict per command in order; <code>enable</code> is <code>result[0]</code> (empty).</p></div></details>
     <details class="q"><summary>In AVD, where do VLAN 10's SVI and VNI come from?</summary><div class="a"><p>The <code>tenants</code> data model in the network-services group vars: the SVI under the VRF, and the VNI computed from <code>mac_vrf_vni_base</code> + VLAN ID (10000 + 10 = 10010) unless set explicitly.</p></div></details>
   </div>
 </section>
@@ -1707,7 +1708,61 @@ print(node.enable("show version")[0]["result"]["version"])</pre></div>
   <p class="note">Add <code>| json</code> to almost any show command for structured output. Add <code>| section X</code> or <code>| include X</code> to filter config.</p>
 </section>
 
-<!-- ============ R4 CONTAINERS ============ -->
+<!-- ============ R4 GOTCHAS ============ -->
+<section class="block" id="gotchas">
+  <h2>EOS gotchas for Cisco people</h2>
+  <p class="note">Where IOS habits fail on EOS. Most are quick exam points: a config that "looks right" but doesn't work. Based on Arista Warrior ch. 33, "Aristacisms" (pp.188, 190–193), checked against current EOS syntax.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>IOS habit</th><th>What EOS does</th><th>Do this instead</th></tr></thead>
+    <tbody>
+      <tr><td><code>speed 1000</code> + <code>duplex full</code></td><td>There is no <code>duplex</code> command, and <code>speed 1000</code> is rejected. Speed and duplex are one keyword. <span class="pg">AW 33 p.188</span></td><td><code>speed 1000full</code> (older syntax: <code>speed forced 1000full</code>) or <code>speed auto</code>. Fix hard-coded ports before pasting IOS configs.</td></tr>
+      <tr><td>Pasting a config over a console</td><td>EOS allows <code>!!</code> comments inside an interface. If a serial paste drops a newline, the next <code>interface</code> line becomes part of a comment, and that port's config lands on the previous interface. <span class="pg">AW 33 p.188</span></td><td>Paste over SSH (or use a config session or <code>configure replace</code>), then check with <code>show running-config diffs</code> or <code>show running-config interfaces …</code>.</td></tr>
+      <tr><td>Routing is on by default</td><td><code>ip routing</code> is off by default, and per VRF it's off too. <code>router rip</code> also starts in <code>shutdown</code>. <span class="pg">AW 33 p.188, 191</span></td><td><code>ip routing</code>, <code>ip routing vrf X</code> for each VRF, <code>no shutdown</code> under the protocol. In any config mode, <code>show active</code> shows that section's config, including the hidden <code>shutdown</code>.</td></tr>
+      <tr><td>"Allowed VLANs" means carried</td><td>A VLAN in a <b>trunk group</b> is carried only on trunks with that group, even if <code>switchport trunk allowed vlan</code> lists it. <code>show interfaces trunk</code> says "allowed", but "allowed and active" says None. <span class="pg">AW 33 p.188, 190</span></td><td>Add <code>switchport trunk group X</code> to the port. Check <code>show vlan</code> (ports per VLAN), <code>show vlan trunk group</code>, and the "allowed and active" part of <code>show interfaces trunk</code>.</td></tr>
+      <tr><td><code>ip vrf X</code> / <code>vrf definition X</code> + <code>rd</code></td><td>Current EOS uses <code>vrf instance X</code>; the RD goes under <code>router bgp</code> &gt; <code>vrf X</code>, not on the VRF. The book's <code>vrf definition</code> and <code>vrf forwarding</code> are older syntax. <span class="pg">AW 33 p.191</span></td><td><code>vrf instance TENANT-A</code>, then on the interface <code>vrf TENANT-A</code>. See <a href="#obj-6-2">6.2</a> for the RD/RT config.</td></tr>
+      <tr><td>Put the VRF on an interface that has an IP</td><td>Putting an interface into a VRF (or changing or removing it) deletes its IP address. EOS tells you once, in a one-line notice. <span class="pg">AW 33 p.191</span></td><td>Always set <code>vrf</code> first, then <code>ip address</code>. In a paste or configlet, keep that order.</td></tr>
+      <tr><td><code>ping 10.1.1.1 vrf X</code></td><td>The VRF keyword comes right after the command: <code>ping vrf X 10.1.1.1</code>, <code>traceroute vrf X …</code>, <code>show ip route vrf X</code>, <code>show ip route vrf all</code>. <span class="pg">AW 33 p.191–192</span></td><td>Same for services: <code>ip name-server vrf MGMT …</code>, <code>ntp server vrf MGMT …</code>, <code>logging vrf MGMT host …</code>.</td></tr>
+      <tr><td>DNS, NTP and syslog in several VRFs</td><td>The book (4.21): management services like DNS, NTP, SNMP, syslog and TACACS+ could live in only one VRF at a time; adding a second VRF gave an error until the first was removed. <span class="pg">AW 33 p.192</span></td><td>Pick one management VRF and put all services there. Newer releases relax this for some services; check yours.</td></tr>
+      <tr><td>Route leaking / routing in VRFs</td><td>The book says VRFs had static routes only and no leaking; both were changing as it went to print. <span class="pg">AW 33 p.191</span></td><td>Current EOS runs BGP, OSPF and more per VRF, and leaks routes with BGP import/export route targets or VRF leak policies. Don't use the book's limits.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="cols">
+    <div class="part"><h4>Commands</h4>
+<pre>interface Ethernet5
+   speed 1000full
+   !! comments persist in the config
+vlan 100-105
+   trunk group SERVERS
+interface Ethernet1
+   switchport mode trunk
+   switchport trunk group SERVERS
+show vlan trunk group
+show interfaces trunk  <span class="c">! "allowed and active"</span>
+
+vrf instance TENANT-A
+ip routing vrf TENANT-A
+interface Vlan10
+   vrf TENANT-A   <span class="c">! before the IP</span>
+   ip address virtual 10.10.10.1/24
+ping vrf TENANT-A 10.20.20.10
+show ip route vrf all
+
+router rip
+   show active    <span class="c">! shows "shutdown"</span>
+   no shutdown</pre></div>
+    <div class="part"><h4>Legacy and trivia</h4><ul>
+      <li><b>OpenFlow</b> lets a controller program the forwarding tables; <b>DirectFlow</b> does the same from the EOS CLI. Both are hardware features on some platforms only. The book's example: a firewall telling the switch to bypass it for trusted flows. Legacy; not on the exam. <span class="pg">AW 33 p.192</span></li>
+      <li><b>Macro-Segmentation Service (MSS)</b> uses CloudVision, VXLAN and flow programming to steer traffic through a firewall logically, without re-cabling. The idea now lives on in CloudVision's MSS for service insertion. <span class="pg">AW 33 p.192</span></li>
+      <li>Easter eggs: <code>show donkeys</code>, <code>show chickens</code>, <code>show farm</code>, <code>show elephants</code>. <span class="pg">AW 33 p.192–193</span></li>
+    </ul></div>
+  </div>
+  <div class="practice"><h3>Practice: gotchas</h3>
+    <details class="q"><summary><span>Ethernet1 is a trunk allowing VLANs 100–105, but no traffic passes for them, though <code>show interfaces trunk</code> lists them as allowed. What do you check?</span></summary><div class="a"><p>Whether the VLANs are in a trunk group (<code>show vlan trunk group</code>). If they are, the port also needs <code>switchport trunk group &lt;name&gt;</code>. The "allowed and active" section of <code>show interfaces trunk</code> shows None until then.</p></div></details>
+    <details class="q"><summary>You moved Vlan10 into VRF TENANT-A, and now hosts can't reach their gateway. Why?</summary><div class="a"><p>Setting the VRF removed the SVI's IP address. Re-add it, and check that <code>ip routing vrf TENANT-A</code> is set.</p></div></details>
+  </div>
+</section>
+
+<!-- ============ R5 CONTAINERS ============ -->
 <section class="block" id="containers">
   <h2>cEOS, vEOS, and workloads on EOS</h2>
   <p class="note">Real-world depth, not an exam objective. The exam lab itself may run on cEOS, so knowing how it behaves still helps. Arista Warrior ch. 31 (pp.175–180) and ch. 32 (pp.181, 184–187) cover both directions: EOS running <em>inside</em> a container or VM (cEOS, vEOS), and containers or VMs running <em>on</em> an EOS switch.</p>
@@ -1889,7 +1944,7 @@ virtual-machine LAB-1
   </div>
 </section>
 
-<!-- ============ R5 SOURCES ============ -->
+<!-- ============ R6 SOURCES ============ -->
 <section class="block" id="sources">
   <h2>Sources</h2>
   <div class="prose">
