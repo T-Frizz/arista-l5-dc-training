@@ -431,8 +431,9 @@ show interfaces counters rates  ! uplink balance</pre></div>
   <p class="intro">Changing a running switch safely, upgrading it without an outage, and getting it back when it won't boot. EOS keeps all state in SysDB and runs each feature as a separate agent, which is why an agent can restart without a reload and why config sessions and rollback work so well.</p></div>
 
   <article class="obj" id="obj-1-1" data-dom="1">
-    <header><span class="oid">1.1</span><h3>EOS operations and safe change</h3><label class="conf"><input type="checkbox" id="c-1-1"> I can do this</label></header>
+    <header><span class="oid">1.1</span><h3>EOS foundations: SysDB, the CLI, and safe config change</h3><label class="conf"><input type="checkbox" id="c-1-1"> I can do this</label></header>
     <div class="body">
+      <p class="note">One unit covering Arista Warrior ch. 7 (SysDB), ch. 8 (Introduction to EOS) and ch. 9 (Configuration Management). Read it in that order: how EOS keeps state, how you drive it from the CLI, and how you change it safely. Book pages are cited; extra detail comes from current EOS docs.</p>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li><b>SysDB</b> is the in-memory database at the center of EOS. Every feature runs as its own Linux process (an <b>agent</b>: Stp, Bgp, Lldp, ConfigAgent…) in protected memory, and agents never talk to each other directly: they publish state to SysDB and subscribe to what they need. <span class="pg">AW 7 p.35</span></li>
@@ -473,6 +474,12 @@ maintenance
         <div class="part traps"><h4>Exam traps</h4><ul>
           <li>Forgetting <code>write memory</code>. A reload or a CloudVision reconcile will wipe unsaved work.</li>
           <li>Leaving a session uncommitted. Changes in a session do nothing until <code>commit</code>.</li>
+          <li><code>commit timer</code> without the confirm: the change silently rolls back when the timer ends.</li>
+          <li><code>configure replace</code> or <code>checkpoint restore</code> expecting a merge: everything not in the file is removed. To add a snippet, use <code>copy flash:file running-config</code>. <span class="pg">AW 9 p.45, 47</span></li>
+          <li>Editing running-config directly while a session is open, then committing the session: your direct edits disappear. <span class="pg">AW 9 p.48</span></li>
+          <li><code>show run | include bgp</code> misses "BGP" and loses context. Use <code>| section</code>. Stacked <code>| include … | include …</code> doesn't filter twice; use <code>grep</code>. <span class="pg">AW 8 p.41, 44–45</span></li>
+          <li>No <code>duplex</code>, no <code>interface range</code>, no <code>do</code>, no <code>service password-encryption</code>. <span class="pg">AW 8 p.39–41</span></li>
+          <li>AAA without <code>local</code> fallback, or with the server in the wrong VRF, locks everyone out. Test from a second session before you log out.</li>
           <li><code>configure replace</code> with a file that lacks management config drops your access.</li>
           <li>An agent's uptime shorter than the switch's uptime means it restarted. Check <code>show agent logs crash</code> before blaming the network.</li>
           <li>Never kill Sysdb or use <code>agent X terminate</code> on a production box: killing Sysdb is a reboot without the "unsaved changes" prompt. <span class="pg">AW 7 p.36–37</span></li>
@@ -508,6 +515,93 @@ show logging | include AGENT-6-INITIALIZED
 <span class="c">! bash sudo killall -9 Stp     -> no STP change</span>
 <span class="c">! bash sudo killall -9 Sysdb   -> like a reboot</span></pre></div>
       </div>
+      <div class="cols">
+        <div class="part"><h4>The EOS CLI (ch. 8): what's different from IOS</h4><ul>
+          <li>EOS is Linux (Fedora-based) with an IOS-like CLI on top, and one image for every platform. A new release can drop end-of-life ASICs and an old release can't drive new ones, so "one image" means any <em>current</em> release runs on any <em>current</em> switch. <span class="pg">AW 8 p.39</span></li>
+          <li>Out of the box only SSH (and console) is on; telnet is off. <code>username X secret Y</code> is stored as SHA-512. There's no clear-text password and no <code>service password-encryption</code>. <span class="pg">AW 8 p.39</span></li>
+          <li>An ambiguous abbreviation gives <code>% Incomplete command</code>; a typo gives a plain <code>% Invalid input</code> with no caret showing where. Use <code>?</code> and Tab. <span class="pg">AW 8 p.39–40</span></li>
+          <li>No <code>do</code> needed: run show and exec commands from any config mode. Typing a command from another mode at the same or a parent level switches modes for you (but not into a child mode). <span class="pg">AW 8 p.40–41</span></li>
+          <li>Emacs keys work: Ctrl-A/E start/end of line, Ctrl-B/F back/forward a character, Esc-B/F back/forward a word. <span class="pg">AW 8 p.40</span></li>
+          <li>Interfaces are all <code>Ethernet</code> regardless of speed: <code>Ethernet1</code> (<code>e1</code>), slot/port on chassis (<code>e3/1</code>), and port/lane on multi-lane ports (<code>e49/1</code>, chassis <code>e3/1/1</code>). <span class="pg">AW 8 p.40</span></li>
+          <li>No <code>interface range</code>: just list them, <code>int e1-3,e10</code>, and the prompt shows the set. <code>$</code> means the last interface (<code>e1-$</code>); on boxes with laned ports you must give every form, <code>e1-$/$</code>. <span class="pg">AW 8 p.40–41</span></li>
+          <li>Curly-brace expansion fills values per interface: <code>{start,end[,step[,pad]]}</code>. <code>ip address 10.1.{1,4}.1/24</code> on e1–4 gives 10.1.1.1 to 10.1.4.1; <code>description DC1-Row-{1,7,2,2}</code> gives Row-01, Row-03… <span class="pg">AW 8 p.40–41</span></li>
+          <li><code>show active</code> = the config of the section you're in. <code>show running-config all</code> (or <code>show run all int e24</code>) includes defaults. <span class="pg">AW 8 p.41–42</span></li>
+        </ul></div>
+        <div class="part"><h4>Pipes, filters and aliases</h4><ul>
+          <li>Pipe options: <code>begin</code>, <code>exclude</code>, <code>include</code>, <code>section</code>, <code>json</code>, <code>no-more</code>, <code>nz</code> (non-zero counters only), <code>redirect</code>/<code>append</code>/<code>tee</code> (to a URL), plus any Linux filter. <span class="pg">AW 8 p.41, 44</span></li>
+          <li><b>Stacked <code>include</code>s don't work</b> as expected; <code>include</code> is the CLI's own filter. Stacked <code>grep</code>s do, because they're Linux. <code>egrep -i</code>, <code>awk</code>, <code>tail</code>, <code>more</code> and <code>wc</code> work too. <span class="pg">AW 8 p.41–42</span></li>
+          <li><code>include</code> and <code>grep</code> are case-sensitive and show only matching lines. <b><code>section</code> is case-insensitive and keeps the parent</b>, so <code>show run | section bgp</code> shows the interface with a "BGP" description and the whole <code>router bgp</code> block. <span class="pg">AW 8 p.44–45</span></li>
+          <li>Aliases save typing, and can take parameters (<code>%1</code>, <code>%2</code>) and run several lines. Example from the book: an alias that lists every interface's MAC with <code>awk</code>. <span class="pg">AW 8 p.42</span></li>
+          <li>No paging on the console by default; add <code>| more</code>. <code>show logging | tail</code> works, and you can redirect to flash with a full Linux path (<code>&gt; /mnt/flash/x.txt</code>). <code>show logging follow</code> streams the log. <span class="pg">AW 8 p.42, 44</span></li>
+        </ul>
+<pre>interface Ethernet1-4
+   no switchport
+   ip address 10.1.{1,4}.1/24        <span class="c">! .1.1 .2.1 .3.1 .4.1</span>
+   description DC1-Row-{1,7,2,2}     <span class="c">! 01 03 05 07</span>
+interface Ethernet1-$                 <span class="c">! to the last port</span>
+   show active
+
+show run | section bgp                <span class="c">! case-insensitive + parents</span>
+show int | grep Ethernet | grep Hardware
+show int counters errors | nz
+show run all interface Ethernet24     <span class="c">! with defaults</span>
+show log | tail | grep admin &gt; /mnt/flash/admin.txt
+
+alias shmc show interfaces | awk '/^[A-Z]/ { intf=$1 } /, address is/ { print intf, $6 }'
+alias intdesc
+   10 config
+   20 interface %1
+   30 description %2
+   40 exit</pre></div>
+      </div>
+
+      <div class="cols">
+        <div class="part"><h4>Configuration management (ch. 9)</h4><ul>
+          <li><b>Running vs startup:</b> changes go live (into SysDB) at once; <code>write memory</code> (= <code>copy running-config startup-config</code>) makes them survive a reload. <code>show running-config diffs</code> shows what's unsaved.</li>
+          <li><b>Merge vs replace:</b> the CLI is additive (you remove things with <code>no</code>). <code>copy flash:file running-config</code> <b>merges</b> a file in. <code>configure replace flash:file</code> <b>replaces</b> everything: anything not in the file goes back to default. The book replaced with a two-line file and lost the hostname and its SSH session. <span class="pg">AW 9 p.45</span></li>
+          <li><b>Config sessions</b> are the safe way: changes are staged, invisible to the switch until <code>commit</code>, and applied all at once. <code>show session-config diffs</code> (or <code>show session-config named X diff</code>) previews them; <code>abort</code> throws them away.</li>
+          <li><b>A session is a full copy of running-config</b> taken when you start it, plus your edits, not a list of commands. Commit is a replace, so <b>changes made to running-config after the session started are lost</b> (the book's Ethernet6 description vanished). Start, edit and commit sessions quickly, and don't mix them with direct edits. <span class="pg">AW 9 p.47–48</span></li>
+          <li><b><code>commit timer hh:mm:ss</code></b> commits the session <em>for</em> that long. Unless you confirm with <code>configure session NAME commit</code> in time, EOS restores the automatic checkpoint it took at the timed commit. It's the modern <code>reload in</code>: same safety net, no reboot. <code>show configuration sessions detail</code> shows the time left. <span class="pg">AW 9 p.48</span></li>
+          <li>Sessions live in RAM: lost on reboot. Defaults are 5 pending and 1 completed session kept (<code>service configuration session max pending|completed</code>). <code>rollback clean-config</code> inside a session starts from a factory-default config, which is how CloudVision builds a full intended config and pushes it as a replace. <span class="pg">AW 9 p.48–49</span></li>
+          <li><b><code>configure replace</code></b> swaps the whole running-config for a file or checkpoint with no reload. Sections that end up identical aren't touched, so BGP, MLAG or VXLAN keep running if their config didn't change. It's built on sessions, so it's all or nothing; check the file includes management, AAA and the mgmt VRF. Recover a bad one with <code>configure replace flash:startup-config</code>. <span class="pg">AW 9 p.45; AW 7 p.37</span></li>
+          <li><b>Checkpoints</b> are named saved copies of running-config. <code>configure checkpoint save NAME</code>, then <code>configure checkpoint restore NAME</code> or <code>configure replace checkpoint:NAME</code> (both replace, not merge). Kept in <code>/mnt/flash/.checkpoints</code> as plain text, so they survive reboots but use flash; 20 kept by default (<code>service configuration checkpoint max saved</code>). <span class="pg">AW 9 p.45, 47</span></li>
+          <li><b>Backups and history:</b> <code>copy running-config flash:</code>, <code>scp:</code> or <code>tftp:</code>; an <code>on-startup-config</code> event handler can copy each save off-box (3.1); CloudVision keeps every config version and can roll back (D2).</li>
+          <li><b>AAA basics:</b> local users with roles, then TACACS+ or RADIUS for login, authorization and command accounting. Point the servers at the management VRF and source interface, and always keep <code>local</code> as the fallback.</li>
+        </ul></div>
+        <div class="part"><h4>Commands</h4>
+<pre><span class="c">! save and compare</span>
+write memory
+show running-config diffs              <span class="c">! running vs startup</span>
+copy running-config flash:pre-change.cfg
+
+<span class="c">! staged, reversible change</span>
+configure checkpoint save pre-change
+configure session CHG-1234
+   interface Ethernet3
+      description NEW
+   show session-config diffs
+   commit timer 00:05:00
+configure session CHG-1234 commit      <span class="c">! confirm in time</span>
+<span class="c">! or inside the session: abort</span>
+show session-config named CHG-1234 diff
+copy flash:snippet.cfg running-config  <span class="c">! merge, not replace</span>
+configure replace flash:startup-config <span class="c">! undo a bad replace</span>
+service configuration checkpoint max saved 20
+show configuration sessions detail
+show config checkpoints
+configure replace checkpoint:pre-change
+
+<span class="c">! AAA (management VRF)</span>
+username admin privilege 15 role network-admin secret &lt;pw&gt;
+tacacs-server host 10.0.0.5 vrf MGMT key &lt;key&gt;
+ip tacacs vrf MGMT source-interface Management1
+aaa group server tacacs+ TAC
+   server 10.0.0.5 vrf MGMT
+aaa authentication login default group TAC local
+aaa authorization exec default group TAC local
+aaa accounting commands all default start-stop group TAC
+show aaa · show users · show tacacs</pre></div>
+      </div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 7, SysDB: notes by page</h4><ul>
           <li><b>p.35</b> Monolithic OS code grows for years in one block; any crash takes the whole switch down. Linux-style process separation fixes that, but on its own a restarted process (say STP) still starts blind and the network reconverges. EOS adds SysDB so a restarted agent finds its old state and reuses it. Demo setup: two switches, one root, one port discarding.</li>
@@ -516,6 +610,22 @@ show logging | include AGENT-6-INITIALIZED
           <li><b>p.36–37</b> Because Sysdb reloads from startup-config, the book loads a whole new config that way (copy a file to startup-config, kill Sysdb): about 15 seconds, versus about 2 minutes for a reload. Interfaces, protocols and MLAG still take their own time to settle. Unsaved running-config is lost with no warning. The log showed <code>HARDWARE-3-DISRUPTIVE_RESTART</code>: the L3 forwarding agent restarted twice quickly, so hardware routes were flushed and reprogrammed. Don't do this.</li>
           <li><b>p.37</b> The right way since 4.14: <code>configure replace flash:file</code> loads a new running-config with no reload, and only processes whose config changed are touched (7 seconds in the book). More in ch. 9.</li>
           <li><b>p.37</b> SysDB is itself an agent in memory, rebuilt at every boot (that's what startup-config is for). It is very robust and essentially never crashes on its own.</li>
+        </ul></div>
+        <div class="part"><h4>Arista Warrior ch. 8, Introduction to EOS: notes by page (p.43 not sent)</h4><ul>
+          <li><b>p.39</b> EOS is Linux with an IOS-style CLI, built to be extended (Python, bash, APIs) and on open standards. SysDB recap: drivers, processes and management run in their own user space, so ProcMgr restarts a crashed agent without touching the network. One image (for example EOS-4.21.1F.swi) for a 384-port 7508R or a 72-port 7280R; the catch is that EOL ASICs leave the image and old images don't know new ASICs (4.12 predates Jericho).</li>
+          <li><b>p.39</b> Login, <code>enable</code>, <code>conf</code> (the <code>terminal</code> keyword is optional). Only SSH is on by default. <code>username … secret</code> is stored as SHA-512; no MD5, no clear text, no <code>service password-encryption</code>. Ambiguous input gives "Incomplete command"; errors give a plain "Invalid input" with no caret.</li>
+          <li><b>p.40</b> Tab completes, <code>?</code> lists options, <code>exit</code> goes up a level, <code>end</code> or Ctrl-Z leaves config. You don't need <code>exit</code> to change modes. Emacs line-editing keys. Interface naming, lists and ranges with <code>,</code> and <code>-</code>, curly-brace expansion with start, end and step.</li>
+          <li><b>p.41</b> Step and zero-padded fields in descriptions; long ranges in the prompt; show commands from config mode; <code>show active</code>; <code>$</code> for the last port and <code>e1-$/$</code> on laned switches (the prompt abbreviates with "…"). Pipe options list; stacked <code>include</code> doesn't work.</li>
+          <li><b>p.42</b> Stacked <code>grep</code> does, because piping is Linux; <code>egrep -i</code> works even though it's not in the help. If EOS surprises you, think like Linux. The <code>awk</code> MAC-list trick saved as an alias. No paging by default; <code>| more</code>. Aliases with parameters. <code>show run all</code> shows defaults. <code>| nz</code> hides all-zero counter rows.</li>
+          <li><b>p.44</b> Unix commands after the pipe: <code>show log | tail</code>, <code>| tail | grep</code>, and redirecting to <code>/mnt/flash/</code> (Linux path required). <code>show logging follow</code> for live logs. <code>show run | include bgp</code> is case-sensitive and misses the interface tied to a BGP description.</li>
+          <li><b>p.45</b> <code>grep -i</code> finds both cases but still no context. <code>show run | section bgp</code> matches any case and shows each match inside its parent section: the interface and the whole <code>router bgp</code> block, including its comment. <code>show run | section mlag</code> is the go-to for MLAG troubleshooting.</li>
+        </ul></div>
+        <div class="part"><h4>Arista Warrior ch. 9, Configuration Management: notes by page (p.46 not sent)</h4><ul>
+          <li><b>p.45</b> The CLI is additive, so before 4.14 a whole new config meant negating every line or overwriting startup-config and reloading. <code>configure replace</code> (4.14+) replaces running-config live; the author converts 24 lab switches between L2 MLAG and L3 ECMP designs this way in about 30 seconds, and CloudVision uses the same mechanism. <code>copy file running-config</code> merges; <code>configure replace</code> with a two-line file wiped everything else, including the hostname, and dropped SSH. <code>configure replace flash:startup-config</code> put it back without a reboot. Unchanged sections aren't disrupted.</li>
+          <li><b>p.45, 47</b> Checkpoints: save, list with <code>show config checkpoints</code>, restore. A restore is a replace, so a description added after the checkpoint disappears. Limit 20 by default, adjustable (0–100 in the book). Stored as plain-text files in <code>/mnt/flash/.checkpoints</code>, which survive reboots but use flash that <code>show config checkpoints</code> doesn't report. <code>checkpoint:</code> works as a source for <code>configure replace</code>.</li>
+          <li><b>p.47</b> Sessions: <code>configure session NAME</code>, make changes, exit; running-config is unchanged and <code>show configuration sessions</code> lists it as pending. <code>show session-config named NAME</code> shows a whole configuration, because a session is a copy of running-config with your changes applied.</li>
+          <li><b>p.48</b> <code>show session-config named NAME diff</code> compares it with running-config. A change made to running-config after the session was created shows as a removal, and committing the session removes it. <code>commit timer</code> commits for a set time; when the timer runs out without a final commit, EOS reverts to the checkpoint it took automatically. The author once cut off a whole country with an empty ACL and learned <code>reload in</code>; the commit timer is better because nothing reboots. Sessions aren't saved to flash.</li>
+          <li><b>p.49</b> <code>rollback clean-config</code> in a session gives an all-defaults config, like <code>write erase</code> plus reload, and is part of how CloudVision configures switches. Session limits default to 5 pending and 1 completed (settable 1–20 and 0–20). Sessions are uncompressed in memory, so don't raise the limits without need. If you want a merge, use <code>copy</code>.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="7"></span><span data-ch="8"></span><span data-ch="9"></span><a class="chip" href="https://www.arista.com/en/um-eos" target="_blank" rel="noopener"><b>EOS</b>User Manual</a><a class="chip lab" data-lab="obj-1-1" href="#"><b>LAB</b>D1</a></div>
@@ -603,6 +713,9 @@ Aboot# boot flash:EOS-4.32.2F.swi</pre></div>
   </article>
 
   <div class="practice"><h3>Practice: D1</h3>
+    <details class="q"><summary><span>You need 10.1.N.1/24 on Ethernet1–4 (N = port) and descriptions SRV-01 to SRV-04. One command each?</span></summary><div class="a"><p><code>interface Ethernet1-4</code>, <code>no switchport</code>, <code>ip address 10.1.{1,4}.1/24</code>, <code>description SRV-{1,4,1,2}</code>.</p></div></details>
+    <details class="q"><summary><span>Find every line of config related to MLAG, with the section it belongs to.</span></summary><div class="a"><p><code>show running-config | section mlag</code>: case-insensitive and keeps parent context. <code>| include</code> would miss mixed-case matches and drop the parent lines.</p></div></details>
+    <details class="q"><summary><span>You opened a config session, then a colleague changed a port description directly. You commit your session. What happens to their change?</span></summary><div class="a"><p>It's lost. The session is a copy of running-config from when it started; commit replaces running-config with it (AW 9 p.48). Check <code>show session-config named X diff</code> before committing.</p></div></details>
     <details class="q"><summary>The Stp agent crashed and restarted. Did STP reconverge, and how do you prove what happened?</summary><div class="a"><p>No. The restarted agent read its state back from SysDB, so ports didn't go through discarding and learning. Prove it with <code>show agent logs crash</code>, <code>show agent uptime</code> (Stp younger than the switch), and <code>AGENT-6-INITIALIZED</code> in <code>show logging</code> with no STP state-change messages.</p></div></details>
     <details class="q"><summary><span>Why does <code>show running-config</code> change the moment you commit a config session, but not survive a reload?</span></summary><div class="a"><p>Running-config is a rendering of SysDB in RAM. Commit writes the changes into SysDB; only <code>write memory</code> copies them to startup-config on flash, which is what SysDB is rebuilt from at boot.</p></div></details>
     <details class="q"><summary>You must change an uplink's VLAN list remotely and might lock yourself out. What do you type?</summary><div class="a"><p>Use <code>configure session NAME</code>, make the change, check <code>show session-config diffs</code>, then <code>commit timer 00:05:00</code>. If you can still reach the switch, run <code>configure session NAME commit</code> to keep it. If not, it rolls back by itself.</p></div></details>
