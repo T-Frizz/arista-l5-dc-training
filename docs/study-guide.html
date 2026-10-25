@@ -142,6 +142,8 @@ td code{white-space:nowrap}
 .week ul{margin:0;padding-left:1.1em;display:grid;gap:3px;font-size:.9rem}
 
 .note{border-left:3px solid var(--accent);padding:4px 0 4px 14px;color:var(--muted);max-width:72ch}
+.pg{font-family:var(--font-mono);font-size:.72rem;color:var(--accent);white-space:nowrap;margin-left:4px}
+.book-notes{border:1px solid var(--rule);border-radius:6px;padding:12px 14px;display:grid;gap:8px}
 .topo{overflow-x:auto;background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:12px}
 .topo svg{display:block;min-width:620px;width:100%;height:auto}
 .topo text{font-family:var(--font-mono);font-size:11px;fill:var(--ink)}
@@ -352,7 +354,8 @@ maintenance
         <div class="part"><h4>Know</h4><ul>
           <li>Standard upgrade: copy the .swi to flash, check its hash, set <code>boot system</code>, save, reload. Outage equals reload time.</li>
           <li>Smart System Upgrade (SSU, <code>reload fast-boot</code>) keeps the data plane forwarding while the control plane restarts on supported fixed platforms. Check first with <code>show reload fast-boot</code>.</li>
-          <li>MLAG ISSU: upgrade one peer at a time. Hosts stay up on the other peer. Check <code>show mlag issu compatibility</code>, then upgrade, wait for MLAG <i>active-full</i> and for reload-delay to expire, then do the peer.</li>
+          <li>MLAG ISSU: upgrade the <b>secondary</b> first, then the primary. Hosts stay up on the other peer. Check <code>show mlag issu compatibility</code>, fix config-sanity, then upgrade, wait for MLAG <i>active-full</i> and for reload-delay to expire, then do the peer. <span class="pg">AW 18 p.96</span></li>
+          <li>Plain <code>reload</code> prints MLAG ISSU warnings (STP not yet restartable, active-partial MLAGs, reload-delay below the recommended value, peer ports still errdisabled). Read them; <code>reload now</code> skips them. <span class="pg">AW 18 p.97</span></li>
           <li>Chassis with two supervisors: upgrade the standby, switch over (SSO), then the other.</li>
           <li>CloudVision upgrades use an image bundle assigned to a container or device, which creates a task you run in a change control.</li>
         </ul></div>
@@ -366,7 +369,10 @@ reload                  <span class="c">! or: reload fast-boot</span>
 
 <span class="c">! MLAG pair, before each peer</span>
 <span class="k">show mlag issu compatibility</span> flash:EOS-4.32.2F.swi
-show mlag detail | include state|reload</pre></div>
+show mlag detail | include State|delay
+show mlag config-sanity
+show spanning-tree bridge detail | include agent
+<span class="c">! "Stp agent restartable : True" before reload</span></pre></div>
       </div>
       <div class="cols">
         <div class="part"><h4>Verify</h4><ul>
@@ -375,7 +381,8 @@ show mlag detail | include state|reload</pre></div>
           <li><code>show mlag interfaces detail</code> during reload-delay</li>
         </ul></div>
         <div class="part traps"><h4>Exam traps</h4><ul>
-          <li>Upgrading both MLAG peers at once, or the second before the first has finished its reload-delay.</li>
+          <li>Upgrading both MLAG peers at once, or the second before the first has finished its reload-delay (its ports still errdisabled).</li>
+          <li>Using <code>reload now</code> during an MLAG upgrade and missing the warnings.</li>
           <li>Not saving after <code>boot system</code>; the old image boots again.</li>
           <li>Not enough flash. Check <code>dir flash:</code> and delete old images first.</li>
         </ul></div>
@@ -757,8 +764,12 @@ show version | include memory|uptime</pre></div>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li>EOS default STP is MSTP. Keep the spines (MLAG pair) as root; edge ports get portfast and BPDU guard.</li>
-          <li>MLAG makes two switches look like one LACP partner. The peer link carries control (VLAN 4094) and any traffic that must cross. Dual-primary detection uses a heartbeat over management.</li>
-          <li><code>reload-delay</code> keeps MLAG ports down after a reboot until the peer link and tables are synced. Non-MLAG ports wait a bit longer.</li>
+          <li>MLAG makes two switches look like one LACP partner: both send the same chassis ID, so the downstream device just sees a normal port-channel and knows nothing about MLAG. <span class="pg">AW 18 p.89, 91</span></li>
+          <li>The peer link is an ordinary trunk port-channel (use at least two members). VLAN 4094 goes in a trunk group so it rides only the peer link, and its SVI gets <code>no autostate</code> so it stays up. <span class="pg">AW 18 p.90</span></li>
+          <li>Domain ID is case-sensitive and must match on both peers. Each peer points <code>peer-address</code> at the other's VLAN 4094 IP. <span class="pg">AW 18 p.90–91</span></li>
+          <li>Every MLAG member must be a port-channel on each peer, even with one link per peer. The <code>mlag</code> number links them; keep the port-channel numbers the same too, for your own sanity. <span class="pg">AW 18 p.92</span></li>
+          <li><code>reload-delay</code> keeps ports errdisabled after a reboot (all but L3 and peer-link ports) until the peer has synced. <code>reload-delay non-mlag</code> lets routed ports come up first so routing settles before MLAGs rehash. <span class="pg">AW 18 p.94</span></li>
+          <li>Dual-primary (split brain): a heartbeat to the peer's management IP. If the peer link dies but the heartbeat still answers, the secondary errdisables its ports after the delay. <span class="pg">AW 18 p.94, 96</span></li>
           <li>VARP: both MLAG peers answer for the same virtual IP and MAC, and both route. VRRP: one master, one backup.</li>
           <li>Routed subinterfaces (<code>Ethernet1.100</code>) give one VLAN-tagged L3 link per VRF on a routed port.</li>
         </ul></div>
@@ -807,8 +818,25 @@ interface Vlan10
           <li>MLAG config-sanity mismatches (VLANs, trunk lists, STP mode) between peers.</li>
           <li>Same <code>mlag</code> ID on both peers is required; different port-channel numbers are allowed but confusing.</li>
           <li>STP running on VLAN 4094 can block the peer link.</li>
+          <li>STP changes made on the <i>secondary</i> are saved but ignored until it becomes primary; config-sanity doesn't check STP priority. Keep STP config identical and compare with <code>show running-config section spanning-tree</code>. <span class="pg">AW 18 p.97–98</span></li>
           <li>VARP needs a real (unique) IP on each SVI plus the shared virtual IP.</li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 18, MLAG: notes by page</h4><ul>
+          <li><b>p.89</b> Peers should run the same EOS. Mixed versions peer only if they're on the MLAG ISSU compatibility list; check with <code>show mlag issu compatibility flash:&lt;image&gt;</code>. The output lists suggested versions when the answer is no.</li>
+          <li><b>p.90</b> Peer-link build order: port-channel trunk, VLAN 4094 with a trunk group on both the VLAN and the peer-link port-channel, STP off for that VLAN, SVI with <code>no autostate</code>, then the <code>mlag configuration</code> block.</li>
+          <li><b>p.91</b> <code>show mlag</code>: look for state Active, negotiation Connected, peer-link and local-int Up, peer-config consistent. The downstream switch's side is plain LACP.</li>
+          <li><b>p.92</b> <code>show mlag interfaces</code> states: <i>active-full</i> (both peers' members up), <i>active-partial</i> (one peer's member down; the local side is listed first, so the two peers show it flipped), <i>inactive</i>. This is also where mismatched port-channel and MLAG numbers show up.</li>
+          <li><b>p.92–93</b> <code>show mlag config-sanity</code> lists global and per-interface mismatches (for example an access VLAN set on one peer only). Add <code>all</code> to see every compared value. Make it the last step of every MLAG change.</li>
+          <li><b>p.93</b> The peer with the lower system MAC becomes primary; you can't choose. The MLAG system ID is the primary's MAC with the locally administered bit set (so it differs from the real MAC in one bit). It doesn't change until both peers reboot or MLAG is unconfigured.</li>
+          <li><b>p.94</b> No preemption: a returning former primary stays secondary. There's no command to force a failover short of a reload. Default reload-delay is 300 s on fixed switches and longer on chassis (Arista suggests about 720 s for big chassis).</li>
+          <li><b>p.96</b> Bow-tie MLAG (MLAG pair to MLAG pair, or to a vPC pair): each side is just LACP to the other. Give each pair its own domain ID. Avoid reusing peer-link IPs across pairs, because they collide once you route them.</li>
+          <li><b>p.96</b> ISSU order: check primary/secondary, fix config-sanity, clear ISSU warnings, upgrade the secondary, watch <code>show mlag detail</code>, confirm, upgrade the primary, confirm. Dual-supervisor chassis: standbys on both first, then the actives.</li>
+          <li><b>p.97</b> Read the warnings <code>reload</code> prints before an MLAG upgrade (incompatible version, STP not restartable yet, active-partial MLAGs, reload-delay too low, peer still errdisabled). <code>reload now</code> skips them, so don't use it here.</li>
+          <li><b>p.97–98</b> Only the primary runs STP. A priority change on the secondary does nothing until a failover, then suddenly takes effect. Keep STP running with MLAG; it's the backstop against someone looping a desk switch.</li>
+        </ul>
+        <p class="note">EOS syntax has changed since the book (4.21). Current EOS uses <code>no spanning-tree vlan-id 4094</code>, and the heartbeat needs a VRF when management is in one: <code>peer-address heartbeat 192.168.0.12 vrf MGMT</code>.</p></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="17"></span><span data-ch="18"></span><span data-ch="19"></span><span data-ch="11"></span><a class="chip" href="https://avd.arista.com/6.4/ansible_collections/arista/avd/examples/l2ls-fabric/index.html" target="_blank" rel="noopener"><b>AVD</b>L2LS example</a><a class="chip lab" data-lab="obj-4-1" href="#"><b>LAB</b>D4</a></div>
     </div>
@@ -873,6 +901,9 @@ show interfaces Ethernet1 | include MTU</pre></div>
 
   <div class="practice"><h3>Practice: D4</h3>
     <details class="q"><summary>show mlag says "inconsistent". Where do you look first?</summary><div class="a"><p><code>show mlag config-sanity</code>. It lists the global and per-interface settings that differ between peers (VLAN lists, STP, port-channel options).</p></div></details>
+    <details class="q"><summary>leaf1 was MLAG primary, reloaded, and came back. Which is primary now, and are leaf1's host ports up?</summary><div class="a"><p>leaf2 stays primary; MLAG doesn't preempt. leaf1's ports (except routed ports and the peer link) stay errdisabled until reload-delay expires; <code>show mlag detail</code> shows the time left. (AW ch.18 p.94)</p></div></details>
+    <details class="q"><summary>You set spanning-tree priority 4096 on leaf2 and nothing changed. Why, and why is that dangerous?</summary><div class="a"><p>leaf2 is MLAG secondary, and only the primary runs STP. The change is saved and takes effect when leaf2 becomes primary, perhaps months later at a failover. config-sanity won't flag it. Put identical STP config on both peers. (AW ch.18 p.97–98)</p></div></details>
+    <details class="q"><summary>The peer link fails but both switches are up. What stops both becoming primary and what happens next?</summary><div class="a"><p>Dual-primary detection: the secondary still hears the primary's heartbeat over management, so after the configured delay it errdisables its interfaces. Without a heartbeat, both go primary (split brain). (AW ch.18 p.94, p.96)</p></div></details>
     <details class="q"><summary>A 9000-byte ping between hosts on different leaves fails; 1400 works. What's the likely cause?</summary><div class="a"><p>An underlay link with MTU below 9050. VXLAN adds 50 bytes. Set fabric links to 9214 and re-test with <code>size 8972 df-bit</code>.</p></div></details>
     <details class="q"><summary>Why do spines in an eBGP L3LS usually share one ASN?</summary><div class="a"><p>A route learned from one spine can't be re-advertised by a leaf to another spine and accepted (same ASN in the path), which stops leaf-to-spine-to-leaf-to-spine path hunting, and the config stays uniform.</p></div></details>
   </div>
