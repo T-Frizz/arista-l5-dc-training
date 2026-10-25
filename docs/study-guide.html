@@ -1430,7 +1430,11 @@ show ip route summary</pre></div>
     <div class="body">
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
-          <li>EOS default STP is MSTP. Keep the spines (MLAG pair) as root; edge ports get portfast and BPDU guard.</li>
+          <li>EOS default STP is MSTP. Keep the spines (MLAG pair) as root; edge ports get portfast and BPDU guard. <span class="pg">AW 17 p.79</span></li>
+          <li>MST terms: an <b>instance</b> is a group of VLANs sharing one tree; <b>MSTI</b> is any instance except 0; <b>MST0 / IST</b> always runs and can't be removed; a <b>region</b> is switches with the same name, revision and VLAN-to-instance map; the <b>CST</b> links regions; the <b>CIST</b> is the whole thing. <span class="pg">AW 17 p.79, 86</span></li>
+          <li>Each region looks like one big bridge to the CST, so a region is its own failure domain: one region per site or building keeps a flapping link in one place from reconverging the others. <span class="pg">AW 17 p.86–87</span></li>
+          <li>MST blocks per instance, not per VLAN. If trunks are pruned differently for VLANs in the same instance, MST can block the only link a VLAN has. <span class="pg">AW 17 p.87</span></li>
+          <li>The MLAG pair runs as one STP bridge (the primary does the work). In an L3LS/EVPN fabric the leaf–spine links are routed, so STP only matters on host-facing ports; keep it on as a safety net with BPDU guard.</li>
           <li>MLAG makes two switches look like one LACP partner: both send the same chassis ID, so the downstream device just sees a normal port-channel and knows nothing about MLAG. <span class="pg">AW 18 p.89, 91</span></li>
           <li>The peer link is an ordinary trunk port-channel (use at least two members). VLAN 4094 goes in a trunk group so it rides only the peer link, and its SVI gets <code>no autostate</code> so it stays up. <span class="pg">AW 18 p.90</span></li>
           <li>Domain ID is case-sensitive and must match on both peers. Each peer points <code>peer-address</code> at the other's VLAN 4094 IP. <span class="pg">AW 18 p.90–91</span></li>
@@ -1443,6 +1447,16 @@ show ip route summary</pre></div>
         </ul></div>
         <div class="part"><h4>Configure (leaf1)</h4>
 <pre>spanning-tree mode mstp
+<span class="k">spanning-tree mst configuration</span>   <span class="c">! applied on exit</span>
+   name DC1
+   revision 1
+   instance 1 vlans 10,20,30
+spanning-tree mst 0 priority 4096   <span class="c">! leaf2 the same (MLAG)</span>
+spanning-tree mst 1 priority 4096
+spanning-tree edge-port bpduguard default
+errdisable recovery cause bpduguard
+interface Ethernet1               <span class="c">! to a downstream L2 switch</span>
+   spanning-tree guard root
 no spanning-tree vlan-id 4094
 vlan 4094
    trunk group MLAGPEER
@@ -1490,6 +1504,8 @@ interface Vlan10
           <li><code>show mlag</code> · <code>show mlag config-sanity</code> · <code>show mlag interfaces</code></li>
           <li><code>show port-channel summary</code> · <code>show lacp neighbor</code></li>
           <li><code>show spanning-tree</code> · <code>show spanning-tree root</code> · <code>show spanning-tree blockedports</code></li>
+          <li><code>show spanning-tree mst configuration</code> (name, revision, map) · <code>show spanning-tree mst 1</code> (look for <code>P2p Boundary</code> in Type) <span class="pg">AW 17 p.83–86</span></li>
+          <li><code>show spanning-tree interface Ethernet10 detail</code> · <code>show spanning-tree counters</code> · <code>show interfaces status errdisabled</code></li>
           <li><code>show ip virtual-router</code> (virtual MAC set, every VIP state active)</li>
           <li><code>show vrrp brief</code> · <code>show vrrp interface Vlan10</code> · <code>show track brief</code></li>
         </ul></div>
@@ -1497,12 +1513,32 @@ interface Vlan10
           <li>MLAG config-sanity mismatches (VLANs, trunk lists, STP mode) between peers.</li>
           <li>Same <code>mlag</code> ID on both peers is required; different port-channel numbers are allowed but confusing.</li>
           <li>STP running on VLAN 4094 can block the peer link.</li>
+          <li>Global <code>spanning-tree priority</code> or <code>root primary</code> only changes MST0. For other instances use <code>spanning-tree mst 1 priority</code> or <code>mst 1 root primary</code> (8192). <span class="pg">AW 17 p.79–80, 84</span></li>
+          <li><code>P2p Boundary</code> on links inside one site means a region mismatch: name, revision or VLAN map differ (one typo is enough). Seeing the right instance number proves nothing. <span class="pg">AW 17 p.83–86</span></li>
+          <li>Arista sends MST0 BPDUs on the default VLAN only; Cisco MST sends them on every VLAN. Swapping a Cisco MST core for Arista can change the root for PVST switches below it. <span class="pg">AW 17 p.80–81</span></li>
+          <li>Pruning a VLAN off one trunk while its instance-mates stay on it can isolate hosts. Fix: don't prune, or put the VLANs in separate instances. <span class="pg">AW 17 p.87</span></li>
+          <li>Edge port gets a BPDU with BPDU guard on: it goes errdisabled and stays down unless errdisable recovery is set.</li>
           <li>STP changes made on the <i>secondary</i> are saved but ignored until it becomes primary; config-sanity doesn't check STP priority. Keep STP config identical and compare with <code>show running-config section spanning-tree</code>. <span class="pg">AW 18 p.97–98</span></li>
           <li>VARP needs a real (unique) IP on each SVI plus the shared virtual IP.</li>
           <li>VARP with no global <code>ip virtual-router mac-address</code>: the VIP config is accepted but nothing answers; <code>show ip virtual-router</code> says the MAC isn't configured. <span class="pg">AW 19 p.104</span></li>
           <li>VARP on a routed Ethernet port is rejected; it's SVI-only. The VIP is never a traffic source, so don't use it as a routing-protocol or ping source. <span class="pg">AW 19 p.104</span></li>
           <li>VRRP VIP equal to a physical interface IP isn't allowed in EOS. A new router with equal priority won't take over an existing master. <span class="pg">AW 19 p.101–102</span></li>
         </ul></div>
+      </div>
+      <div class="book-notes">
+        <div class="part"><h4>Arista Warrior ch. 17, Multiple Spanning Tree Protocol: notes by page</h4><ul>
+          <li><b>p.79</b> <code>spanning-tree mode</code> takes backup, mstp, none, rapid-pvst or rstp; MSTP is the default. MST is standards-based and RSTP-fast, and avoids PVST's per-VLAN limits (the book's example is a switch capped at a few hundred instances). Even/odd VLAN root splitting for load sharing isn't needed once MLAG and VARP use every link.</li>
+          <li><b>p.79–80</b> MST0 always runs and every port sends its BPDUs. <code>spanning-tree root primary</code> sets priority 8192; a global <code>spanning-tree priority</code> only touches MST0. The author moved a 200+ switch network to MST without an outage.</li>
+          <li><b>p.80</b> Cisco and Arista differ: Cisco sends MST0 BPDUs on every VLAN, so an MST0 root wins every VLAN of attached PVST switches. Arista sends them only on the default VLAN. Story: moving a 400-VLAN core to MST left an attached PVST switch processing BPDUs for every VLAN and pegged its CPU.</li>
+          <li><b>p.81</b> An Arista MST switch between two Rapid-PVST switches is root only for VLAN 1; other VLANs' PVST BPDUs pass through unprocessed, so the PVST switches elect roots among themselves across it. Plan for root changes when replacing a Cisco MST core.</li>
+          <li><b>p.83</b> Instances are set in <code>spanning-tree mst configuration</code> mode and take effect when you exit. A switch whose map doesn't match its neighbor shows those ports as <code>P2p Boundary</code>.</li>
+          <li><b>p.84</b> A region needs the same instance map, name and revision. Per-instance root: <code>spanning-tree mst 1 root primary</code>, <code>spanning-tree mst 2 priority 8192</code>. Giving one switch a different name alone splits it into its own region, and every port becomes boundary.</li>
+          <li><b>p.85–86</b> Remove the odd name and match the maps and the boundary ports go away; check with <code>show spanning-tree mst 1</code>. Don't trust the instance number alone: boundary ports mean a mismatch somewhere.</li>
+          <li><b>p.86</b> Terms: instance, MSTI, region, CST, IST, CIST. Think of a region like a BGP confederation member: inside it has its own topology; from outside the whole region acts as one bridge.</li>
+          <li><b>p.86–87</b> Region per site as a failure domain: three data centers bridged over dark fiber kept reconverging until each became its own region, after which inter-site changes stopped rippling inside sites. Advice: keep it simple, use multiple regions only for physically separate places, and one region with everything in MST1 (not MST0) is fine for a small network.</li>
+          <li><b>p.87</b> Pruning trap: in PVST each VLAN has its own tree, so a pruned trunk is harmless. In MST the VLANs share one instance, so MST may block the one trunk that carried the pruned VLAN's only path, cutting off hosts. Stop pruning, or split the VLANs into different instances.</li>
+        </ul>
+        <p class="note">Beyond the book (current EOS): instance IDs run 0–4094 (the book's "1 to 4,096" is a typo). For edges, <code>spanning-tree portfast</code> + <code>spanning-tree bpduguard enable</code> per port, or <code>spanning-tree edge-port bpduguard default</code> for all edge ports. <code>spanning-tree guard root</code> on ports toward switches that must never become root; <code>spanning-tree guard loop</code> on blocked trunks. For mixed MST/PVST sites, current EOS can act as a PVST border on MST ports (<code>spanning-tree mst pvst border</code>); check that your release supports it before relying on it.</p></div>
       </div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 18, MLAG: notes by page</h4><ul>
@@ -1598,6 +1634,8 @@ show interfaces Ethernet1 | include MTU</pre></div>
   </article>
 
   <div class="practice"><h3>Practice: D4</h3>
+    <details class="q"><summary><span>Two leaves in the same building show <code>P2p Boundary</code> on the link between them, and both have <code>instance 1 vlans 10,20,30</code>. What's wrong?</span></summary><div class="a"><p>They're in different regions. Compare <code>show spanning-tree mst configuration</code>: the name or revision differs (or the maps differ somewhere else). All three must match.</p></div></details>
+    <details class="q"><summary>VLANs 100 and 300 are in MST1. VLAN 300 is pruned off one trunk in a triangle. PC-A can't reach PC-B on VLAN 300. Why?</summary><div class="a"><p>MST blocks per instance. The loop on VLAN 100 made MST1 block a link that was VLAN 300's only path. Stop pruning VLAN 300 there, or move it to its own instance.</p></div></details>
     <details class="q"><summary>show mlag says "inconsistent". Where do you look first?</summary><div class="a"><p><code>show mlag config-sanity</code>. It lists the global and per-interface settings that differ between peers (VLAN lists, STP, port-channel options).</p></div></details>
     <details class="q"><summary>leaf1 was MLAG primary, reloaded, and came back. Which is primary now, and are leaf1's host ports up?</summary><div class="a"><p>leaf2 stays primary; MLAG doesn't preempt. leaf1's ports (except routed ports and the peer link) stay errdisabled until reload-delay expires; <code>show mlag detail</code> shows the time left. (AW ch.18 p.94)</p></div></details>
     <details class="q"><summary>You set spanning-tree priority 4096 on leaf2 and nothing changed. Why, and why is that dangerous?</summary><div class="a"><p>leaf2 is MLAG secondary, and only the primary runs STP. The change is saved and takes effect when leaf2 becomes primary, perhaps months later at a failover. config-sanity won't flag it. Put identical STP config on both peers. (AW ch.18 p.97–98)</p></div></details>
