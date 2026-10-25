@@ -372,6 +372,21 @@ $ docker exec -it clab-l5dc-leaf1 Cli</code></pre></li>
 $ pip install pyavd anta
 $ python3 labs/avd/build.py        # writes labs/avd/intended/configs/*.cfg</code></pre></li>
       </ol>
+      <h3 id="setup-ceos">What containerlab does for you</h3>
+      <p>You can start cEOS with plain <code>docker create</code>, and <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D" target="_blank" rel="noopener">AW Ch 31 · Containers</a> walks through it (pp. 175-177). containerlab's <code>ceos</code> node kind sets the same options for you, which is why the topology file is so short.</p>
+      <div class="table-wrap"><table class="grid">
+        <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>--privileged</code></td><td>EOS needs to manage interfaces, routes and kernel settings inside the container.</td></tr>
+          <tr><td><code>-e CEOS=1</code>, <code>-e container=docker</code></td><td>Tell EOS it is cEOS running under Docker, not EOS on hardware.</td></tr>
+          <tr><td><code>-e EOS_PLATFORM=ceoslab</code></td><td>Selects the lab platform; the right value is in the readme for your cEOS release.</td></tr>
+          <tr><td><code>-e ETBA=1</code></td><td>Use the software data plane, since there is no switching ASIC.</td></tr>
+          <tr><td><code>-e INTFTYPE=eth</code></td><td>Map Linux <code>ethN</code> interfaces to EOS <code>EthernetN</code>.</td></tr>
+          <tr><td><code>-e SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1</code></td><td>Skip ZTP at boot so the startup config is used.</td></tr>
+          <tr><td><code>/sbin/init</code></td><td>The command that boots EOS inside the container.</td></tr>
+        </tbody>
+      </table></div>
+      <p>containerlab also maps <code>eth0</code> to <code>Management0</code> and loads the startup config. The bigger difference is the links. Plain Docker networks are Linux bridges, which swallow link-local multicast such as LLDP and LACP frames, and when a container joins more than three networks the order of its interfaces is not guaranteed (p. 177). containerlab wires each link as a direct veth pair, so <code>Ethernet1</code> is always the link you drew and LLDP, LACP and MLAG work. That is why this lab uses containerlab rather than hand-made Docker networks. Lab D1 has an <a href="#lab-d1-containers">optional drill</a> that shows the bridge problem.</p>
       <h3>Reset or skip ahead</h3>
       <p>Two configs act as save points. The day-0 configs are in <code>labs/topology/startup/</code>. The finished EVPN fabric that AVD generates is in <code>labs/avd/intended/configs/</code>. Copy either onto a switch and replace the running config in one step.</p>
       <pre class="cli"><code>$ docker cp labs/avd/intended/configs/leaf1.cfg clab-l5dc-leaf1:/mnt/flash/target.cfg
@@ -906,6 +921,74 @@ leaf1# delete flash:EOS-4.34.3M.swi</code></pre>
         <p>Hidden files do not show in a plain <code>dir</code>. Use <code>dir /all flash:</code> (shows hidden files) or <code>bash sudo du -ah /mnt/flash | sort -h | tail</code> to find the big file and delete it (<code>delete flash:.hidden-dump.bin</code>). For boot extensions, rebuild the list from what is really installed: <code>copy installed-extensions boot-extensions</code>, then check <code>show boot-extensions</code>. On cEOS do not fill flash completely: it is your host disk.</p>
       </details>
     </div>
+  </section>
+
+  <section class="part" id="lab-d1-containers">
+    <h3>Containers: EOS in a container, containers in EOS (optional)</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D" target="_blank" rel="noopener">AW Ch 31 · Containers</a> (pp. 175-180). It is real-world material and not an exam objective, but you already depend on it: every switch in this lab is a container.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> A container shares the host's kernel instead of emulating hardware like a VM, so it is small and starts almost instantly (p. 175). EOS and containers meet in two ways. <em>EOS in a container</em> (cEOS) lets EOS run on hardware Arista did not build, and lets large operators manage switch software with the same orchestration tools they use for every other container (p. 175). <em>Containers in EOS</em>: EOS includes Docker, managed from the CLI by <code>container-manager</code> so it fits normal switch workflows and CloudVision (pp. 177-178). An <em>image</em> is the package; a <em>container</em> is a running copy of it, and each <code>docker run</code> makes a new container with a random name (p. 179). A container stops as soon as its main command ends, so a container that only runs <code>/bin/bash</code> with no terminal exits at once (p. 178).</aside>
+
+    <h4>Where containers fit: use cases</h4>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Use case</th><th>How it works</th><th>Watch for</th></tr></thead>
+      <tbody>
+        <tr><td>Lab and training</td><td>cEOS in containerlab, as in this guide. A full fabric runs on a laptop in minutes.</td><td>No ASIC: no LANZ, no TAP aggregation, no hardware counters, MTU limits on veth links.</td></tr>
+        <tr><td>Pre-change testing ("digital twin")</td><td>A CI pipeline builds the AVD configs, deploys them to a cEOS copy of the fabric, runs ANTA, and only then lets the change reach CloudVision. Arista's hosted ACT labs do the same with vEOS and cEOS.</td><td>Keep the twin's topology and EOS release in step with production, or the test proves nothing.</td></tr>
+        <tr><td>White-box and large operators</td><td>cEOS on third-party merchant-silicon switches, deployed and upgraded by the same orchestrator that runs the rest of their containers (p. 175).</td><td>Needs a supported hardware platform and its cEOS build, not cEOS-lab.</td></tr>
+        <tr><td>Cloud and virtual routing</td><td>The same EOS code runs as a VM or container in public clouds (CloudEOS) and in the lab (vEOS, cEOS), so one config style and one automation path cover all of them.</td><td>Licensing and throughput depend on the cloud instance, not on a switch ASIC.</td></tr>
+        <tr><td>Small apps on the switch</td><td><code>container-manager</code> runs a container on the switch: a monitoring or flow collector at a site with no server, an <code>iperf3</code> endpoint for testing, a custom health checker, a small DNS or syslog relay.</td><td>Switch CPU, RAM and flash are small and shared with EOS. You own patching the image. For tight integration with EOS, an EOS SDK agent or extension is usually better.</td></tr>
+        <tr><td>Automation tooling</td><td>The tools around the network ship as containers: ANTA, AVD build runners, gNMI collectors, Grafana and Prometheus stacks for streaming telemetry.</td><td>These run on servers, not on the switches.</td></tr>
+      </tbody>
+    </table></div>
+
+    <ol class="tasks">
+      <li><p>On your lab host (not inside the lab), create two cEOS containers with plain <code>docker create</code> using the options from <a href="#setup-ceos">What containerlab does for you</a>. Connect both to two Docker networks and start them. Give <code>Ethernet1</code> on each an IP address in the same subnet, ping across, then check <code>show lldp neighbors</code>. Compare with any link in the containerlab fabric.</p></li>
+      <li><p>On leaf1, try <code>show container-manager ?</code> and write down what cEOS supports.</p></li>
+      <li><p>Read the hardware solution below and explain three things: why the first container showed as <code>exited</code>, what happens to containers and images when the switch reloads, and what a container backup costs.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · two cEOS containers by hand</summary>
+      <pre class="cli"><code>$ for n in 1 2; do
+    docker create --name=ceos$n --privileged \
+      -e CEOS=1 -e container=docker -e EOS_PLATFORM=ceoslab \
+      -e SKIP_ZEROTOUCH_BARRIER_IN_SYSDBINIT=1 -e ETBA=1 -e INTFTYPE=eth \
+      -it ceos:4.34.2F /sbin/init
+  done
+$ docker network create net-1 &amp;&amp; docker network create net-2
+$ for n in 1 2; do docker network connect net-1 ceos$n; docker network connect net-2 ceos$n; done
+$ docker start ceos1 ceos2
+! wait a minute or two for EOS to boot
+$ docker exec -it ceos1 Cli
+localhost&gt;enable
+localhost#configure
+localhost(config)#hostname ceos1
+ceos1(config)#interface Ethernet1
+ceos1(config-if-Et1)#no switchport
+ceos1(config-if-Et1)#ip address 10.0.0.1/24
+! same on ceos2 with 10.0.0.2/24, then:
+ceos2#ping 10.0.0.1
+ceos2#show lldp neighbors
+
+$ docker rm -f ceos1 ceos2 &amp;&amp; docker network rm net-1 net-2</code></pre>
+      <p>The ping works but the LLDP table stays empty, because the Linux bridge behind each Docker network does not forward LLDP frames (p. 177). Which Docker network became <code>Ethernet1</code> is also up to Docker, so check which interface your ping really used. If the backslash-continued command fails with "command not found" for <code>-e</code>, you have a space after a backslash (p. 176). In the containerlab fabric, <code>show lldp neighbors</code> on leaf1 lists both spines and leaf2, because each link is a veth pair.</p>
+    </details>
+    <details class="solution"><summary>Solution · container-manager (hardware and vEOS; reference only)</summary>
+      <pre class="cli"><code>switch# container-manager pull ubuntu
+switch(config)# container-manager
+switch(config-container-mgr)# container Ubuntu
+switch(config-container-mgr-container-Ubuntu)# image ubuntu
+switch(config-container-mgr-container-Ubuntu)# command /bin/sleep 300
+switch(config-container-mgr-container-Ubuntu)# on-boot
+switch(config-container-mgr-container-Ubuntu)# end
+switch# container-manager start Ubuntu
+switch# show container-manager info
+switch# show container-manager containers brief
+switch# bash sudo docker run -it ubuntu
+switch# container-manager backup container Ubuntu
+switch# show container-manager backup
+switch# container-manager backup remove Ubuntu</code></pre>
+      <p>cEOS does not run Docker inside itself, so expect most of these commands to be missing or to fail in this lab. Check <code>show container-manager ?</code> on your platform; availability and syntax depend on the hardware and EOS release. The first container exited because its command, <code>/bin/bash</code> with no terminal, finished straight away; a long-running command such as <code>sleep</code> or a real service keeps it up (pp. 178-179). Everything outside <code>flash:</code> and <code>drive:</code> is lost on reload, containers included. With <code>on-boot</code>, EOS rebuilds the container at boot by pulling the image again, which needs internet access (p. 179). <code>container-manager backup</code> saves the image to <code>/mnt/flash/.containermgr/</code> so boot uses the local copy, but a single small Ubuntu image is about 90 MB of flash (pp. 179-180). <code>sudo docker run</code> from bash works too, but each run creates another unmanaged container; managing containers through <code>container-manager</code> keeps them in the config where CloudVision can see them (p. 178).</p>
+    </details>
+    <aside class="note real"><strong>Real world.</strong> The most valuable container use case for most teams is the digital twin: test every change on a cEOS copy of the fabric before it reaches production. This lab already has every piece: the containerlab topology, the AVD build and the ANTA catalogs. Running containers on production switches is rarer. Do it only when there is truly no server nearby, cap the resources, and treat the image like any other software you must patch.</aside>
   </section>
 
   <section class="part checkpoint"><h3>Checkpoint</h3>
