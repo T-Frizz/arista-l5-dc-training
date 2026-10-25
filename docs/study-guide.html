@@ -771,7 +771,7 @@ show version | include memory|uptime</pre></div>
           <li><code>reload-delay</code> keeps ports errdisabled after a reboot (all but L3 and peer-link ports) until the peer has synced. <code>reload-delay non-mlag</code> lets routed ports come up first so routing settles before MLAGs rehash. <span class="pg">AW 18 p.94</span></li>
           <li>Dual-primary (split brain): a heartbeat to the peer's management IP. If the peer link dies but the heartbeat still answers, the secondary errdisables its ports after the delay. <span class="pg">AW 18 p.94, 96</span></li>
           <li>VARP: both MLAG peers answer ARP for the same virtual IP with one global virtual MAC, and both route, so traffic is routed on whichever switch receives it and never crosses the peer link. No protocol, no timers, so failover has no lag. <span class="pg">AW 19 p.103–104</span></li>
-          <li>VRRP: one master routes, backups listen; only the master sends advertisements (every 1 s by default). Use it where VARP can't go, such as routed Ethernet ports. <span class="pg">AW 19 p.99, 104</span></li>
+          <li>VRRP: one master routes, backups listen; only the master sends advertisements (every 1 s by default). Use it where VARP can't go, such as routed Ethernet ports. <span class="pg">AW 19 p.99–100, 104</span></li>
           <li>Routed subinterfaces (<code>Ethernet1.100</code>) give one VLAN-tagged L3 link per VRF on a routed port.</li>
         </ul></div>
         <div class="part"><h4>Configure (leaf1)</h4>
@@ -855,8 +855,8 @@ interface Vlan10
       </div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 19, First-Hop Redundancy: notes by page</h4><ul>
-          <li><b>p.99</b> VRRP is the open standard (RFCs 2338, 3768, 5798) and works like HSRP. A virtual router is a VRID (1–255) plus its virtual IPs. The same VRID can be reused on different interfaces, but not the same VRID and VIP pair. <code>show vrrp</code> shows nothing until <code>ip routing</code> is on.</li>
-          <li><b>p.99</b> Defaults: advertisements every 1 s, preemption on, priority 100. The virtual MAC is <code>0000.5e00.01xx</code> where xx is the VRID in hex.</li>
+          <li><b>p.99–100</b> VRRP is the open standard (RFCs 2338, 3768, 5798) and works like HSRP. A virtual router is a VRID (1–255) plus its virtual IPs. The same VRID can be reused on different interfaces, but not the same VRID and VIP pair. <code>show vrrp</code> shows nothing until <code>ip routing</code> is on.</li>
+          <li><b>p.99–100</b> Defaults: advertisements every 1 s, preemption on, priority 100. The virtual MAC is <code>0000.5e00.01xx</code> where xx is the VRID in hex.</li>
           <li><b>p.101</b> Preemption can be turned off per group, or delayed: a minimum delay before taking over, and a separate delay after a reload. Advertisement timers can be changed, and <code>default</code> puts each setting back.</li>
           <li><b>p.101</b> Priority runs 1–254, higher wins. If a master already exists with the same priority, a new router stays backup. Raise priority to make a router master.</li>
           <li><b>p.102</b> With preemption on, the higher-priority router takes master back as soon as it returns. EOS won't accept a VIP that equals an interface's own IP.</li>
