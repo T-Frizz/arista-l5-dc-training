@@ -42,3 +42,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 74 | Containers | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/74%5B%3Bvnd.vst.idref%3Dchapter-idm45591785782648%5D!/4/2/2%5Bcontainers%5D) |
 | 76 | vEOS | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/76%5B%3Bvnd.vst.idref%3Dchapter-idm45591785360776%5D!/4/2/2%5Bveos_idd0052%5D) |
 | 78 | Aristacisms | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/78%5B%3Bvnd.vst.idref%3Dchapter-idm45591784974328%5D!/4/2/2%5Baristacisms%5D) |
+| 80 | Index | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/80%5B%3Bvnd.vst.idref%3Dindex-idm45591784646360%5D!/4/2/2%5Bidm45591784646360%5D/2/1:0) |
