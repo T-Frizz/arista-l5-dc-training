@@ -711,6 +711,80 @@ leaf1# dir flash:schedule/cfg-archive/</code></pre>
     </div>
   </section>
 
+  <section class="part" id="lab-d1-sysdb">
+    <h3>SysDB and agents: why an EOS process can crash without an outage</h3>
+    <p>This section follows <a href="https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/26%5B%3Bvnd.vst.idref%3Dchapter-idm45591790635208%5D!/4/2/2%5Bsysdb_idd0012%5D" target="_blank" rel="noopener">AW Ch 7 · SysDB</a> (pp. 35-37). SysDB is the idea everything else in EOS is built on: hitless agent restarts, <code>configure replace</code>, ISSU and SSU, and the state CloudVision streams. Expect it in "explain why" questions and as the reason behind many EOS behaviors you will see in the lab exam.</p>
+    <aside class="note"><strong>Key ideas from the chapter.</strong> Older network operating systems were one large program, so a bug in one feature could take down the whole switch, and a restarted process had to relearn everything (p. 35). EOS runs each feature as a separate Linux process, called an <em>agent</em> (Stp, Lldp, Bgp, Lacp, and so on), each in its own protected memory. Agents do not keep their state privately: they write it to <em>SysDB</em>, a central in-memory database, and read other agents' state from it (p. 35). When an agent starts, it first asks SysDB for its state. If it finds none (a fresh boot) it starts from scratch; if it finds state (a restart) it carries on from there. So if Stp crashes, the process manager restarts it, Stp reads the current topology back from SysDB, and the network never reconverges (p. 35). SysDB lives in memory, so it does not survive a reboot; that is the job of startup-config (p. 37).</aside>
+    <div class="table-wrap"><table class="grid">
+      <thead><tr><th>Event</th><th>What happens</th><th>Network impact</th></tr></thead>
+      <tbody>
+        <tr><td>One agent crashes or is killed (Stp, Lldp)</td><td>The process manager restarts it within about a second; it reloads its state from SysDB and logs <code>AGENT-6-INITIALIZED</code> (p. 36).</td><td>None. No STP topology change, no lost LLDP neighbors.</td></tr>
+        <tr><td>Feature turned off and on (<code>spanning-tree mode none</code>, then <code>mstp</code>)</td><td>The state is deleted, so the agent starts from nothing (p. 36).</td><td>Full reconvergence: ports go discarding, learning, forwarding.</td></tr>
+        <tr><td>SysDB itself is killed</td><td>Every agent loses its state and restarts; running-config is rebuilt from startup-config (p. 36).</td><td>The same as a reload, only faster. Unsaved changes are lost.</td></tr>
+        <tr><td>Forwarding agent restarted twice in quick succession</td><td>EOS gives up on a hitless restart and reprograms the hardware tables (<code>HARDWARE-3-DISRUPTIVE_RESTART</code>, p. 37).</td><td>A brief forwarding outage.</td></tr>
+        <tr><td><code>configure replace</code></td><td>Only the agents whose config changed are touched (p. 37).</td><td>Only what the config change itself causes.</td></tr>
+      </tbody>
+    </table></div>
+    <aside class="note warn"><strong>Watch out.</strong> Killing agents is for a lab only. The book says the same in plain words: never do it on a production switch unless Arista TAC asks you to (pp. 35-36). Everything below runs on cEOS, but expect agent names and timings to differ a little from hardware.</aside>
+    <ol class="tasks">
+      <li><p>On leaf1, list the running agents and their restart counts. Find the Stp and Lldp agents and their Linux process IDs.</p></li>
+      <li><p>Record the STP state of <code>Port-Channel5</code> (toward host1) on leaf1 and on host1. Put a marker in the log, kill the Stp agent with <code>kill -9</code>, and show that it restarted, that STP state did not change, and that the log has no port state transitions.</p></li>
+      <li><p>Do the same with the Lldp agent and check that <code>show lldp neighbors</code> is full immediately after the restart.</p></li>
+      <li><p>Now compare a real reconvergence: put another marker in the log, set <code>spanning-tree mode none</code> on host1, then <code>spanning-tree mode mstp</code> again, and read the log on host1. Use host1, not a leaf, so the fabric is not disturbed.</p></li>
+      <li><p>Lab only: on host2, save the config, then kill SysDB and watch what happens. Time how long until you can log in again.</p></li>
+      <li><p>Explain why <code>configure replace</code> is the right way to load a completely different config, and why the book's trick of killing SysDB to load a new startup-config is not.</p></li>
+    </ol>
+    <details class="solution"><summary>Solution · agents and processes</summary>
+      <pre class="cli"><code>leaf1# show agent uptime
+leaf1# show agent uptime | include Stp|Lldp
+leaf1# show processes | include Stp|Lldp|Sysdb
+leaf1# bash ps -eo pid,etime,cmd | grep -E "Stp|Lldp|Sysdb" | grep -v grep</code></pre>
+      <p><code>show agent uptime</code> lists each agent with how long it has run and how many times it has restarted; a non-zero restart count on a healthy switch is worth a TAC case. Several processes may match <code>Stp</code> (for example <code>Stp</code> and <code>StpTopology</code>); the book kills everything matching the name (p. 36). Agent crash details, when there are any, go to <code>/var/log/agents/</code> and appear in <code>show tech-support</code>.</p>
+    </details>
+    <details class="solution"><summary>Solution · kill Stp and Lldp, no reconvergence</summary>
+      <pre class="cli"><code>leaf1# show spanning-tree interface Port-Channel5
+host1# show spanning-tree
+leaf1# send log message KILLING-STP
+leaf1# bash sudo killall -9 Stp
+leaf1# show logging last 2 minutes
+leaf1# show agent uptime | include Stp
+leaf1# show spanning-tree interface Port-Channel5
+
+leaf1# send log message KILLING-LLDP
+leaf1# bash sudo killall -9 Lldp
+leaf1# show lldp neighbors
+leaf1# show logging last 2 minutes | include Lldp|AGENT</code></pre>
+      <pre class="out"><code>Oct 25 14:02:11 leaf1 ConfigAgent: %SYS-6-LOGMSG_INFO: Message from admin on vty3: KILLING-STP
+Oct 25 14:02:13 leaf1 Stp: %AGENT-6-INITIALIZED: Agent 'Stp' initialized; pid=8812
+Oct 25 14:02:13 leaf1 Stp: %SPANTREE-6-INTERFACE_ADD: Interface Port-Channel5 has been added to instance MST0</code></pre>
+      <p>Representative output. If <code>send log message</code> is not accepted, check <code>send log ?</code> on your release. The interface is added back to MST0, but there is no "moving from discarding to learning" or "learning to forwarding" line, because Stp found the state already in SysDB and did not have to run the protocol from scratch (p. 36). The restart count in <code>show agent uptime</code> went up by one. LLDP neighbors are there straight away for the same reason. The book also shows an undocumented <code>agent ... terminate</code> command; leave it, and the agent <code>shutdown</code> and <code>environment</code> options, alone unless TAC asks (p. 36).</p>
+    </details>
+    <details class="solution"><summary>Solution · a real reconvergence, for comparison</summary>
+      <pre class="cli"><code>host1# send log message STP-OFF-ON
+host1(config)# spanning-tree mode none
+host1(config)# spanning-tree mode mstp
+host1# show logging last 2 minutes | include SPANTREE</code></pre>
+      <pre class="out"><code>host1 StpTopology: %SPANTREE-6-DISABLED: STP is disabled.
+host1 Stp: %SPANTREE-6-INTERFACE_DEL: Interface Port-Channel1 has been removed from instance MST0
+host1 StpTopology: %SPANTREE-6-MODE_CHANGE: Spanning tree mode is now mstp.
+host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from discarding to learning
+host1 Stp: %SPANTREE-6-INTERFACE_STATE: Interface Port-Channel1 instance MST0 moving from learning to forwarding</code></pre>
+      <p>This time the state was deleted when STP was turned off, so the agent started from nothing and the port walked through discarding, learning and forwarding (p. 36). host1's pings to its gateway stall for that time. Killing the process caused no outage; turning the feature off and on did.</p>
+    </details>
+    <details class="solution"><summary>Solution · kill SysDB (lab only, host2)</summary>
+      <pre class="cli"><code>host2# write memory
+host2# bash sudo killall -9 Sysdb
+! the session drops; log in again after a short wait
+$ ssh admin@172.100.100.32
+host2# show logging | include AGENT-6-INITIALIZED
+host2# show agent uptime</code></pre>
+      <p>Your session closes, every agent loses its connection to SysDB and restarts, and the switch comes back running startup-config, which is the same result as a reload but much faster (the book saw about 30 seconds against more than 4 minutes for a full reload on a 7280R, p. 36). Anything not saved is gone, with no warning (p. 37). On cEOS the whole container may restart instead; if host2 does not come back, run <code>docker restart clab-l5dc-host2</code> (or restart the node in EVE-NG).</p>
+      <p>The book then uses this to load a new config: copy a different file to startup-config and kill SysDB (pp. 36-37). It works, but it is a reload in disguise, and it can trigger the disruptive hardware restart shown above. <code>configure replace flash:FILE</code> does the same job in seconds with no reload, touches only what changed, and with a configuration session you can review the diff and use <code>commit timer</code> for an automatic rollback (objective <a href="#obj-1-1">1.1</a>). That is the only method to use on a real network (p. 37).</p>
+    </details>
+    <aside class="note exam"><strong>Exam tip.</strong> Know the chain: agents keep state in SysDB, so an agent restart is hitless; SysDB is in memory, so a reboot needs startup-config; and the same separation is what makes <code>configure replace</code>, configuration sessions and SSU/ISSU possible. If a question asks why EOS can restart a protocol process without a topology change, the answer is state in SysDB, not "fast timers".</aside>
+    <aside class="note real"><strong>Real world.</strong> The SysDB model is also why CloudVision sees so much: TerminAttr subscribes to state changes on the switch and streams them, so CloudVision gets the same live state the agents use, not a five-minute SNMP poll. And because a single crashing agent rarely causes an outage, watch for it explicitly: alert on <code>AGENT-6-INITIALIZED</code> outside boot time and on rising restart counts in <code>show agent uptime</code>, and open a TAC case with <code>show tech-support</code> when you see one.</aside>
+  </section>
+
   <section class="part" id="obj-1-2">
     <h3><span class="obj">1.2</span> EOS upgrades: standard, SSU, MLAG ISSU, chassis, CLI and CloudVision</h3>
     <p>Change window: upgrade POD_A (leaf1 and leaf2) to a new EOS release with no host outage. host1 is dual-homed with an LACP port-channel, so one leaf at a time can be out of service. You will run the real procedure up to the reload. cEOS cannot boot a <code>.swi</code> image, so the reload step uses a container image swap as the analog.</p>
@@ -1055,6 +1129,7 @@ switch(config-vm-LABVM)# no enable</code></pre>
     <ul class="checklist">
       <li>I can stage a change in a session, show its diff from inside and outside the session, and commit it with a timer that I then confirm.</li>
       <li>I can save a named checkpoint and return to it with <code>configure replace checkpoint:NAME</code>, and I know that replace removes anything not in the file.</li>
+      <li>I can explain how agents use SysDB, show that killing the Stp agent causes no reconvergence while turning STP off and on does, and say why <code>configure replace</code> beats a SysDB restart for loading a new config.</li>
       <li>I can explain standard upgrade vs SSU vs MLAG ISSU vs chassis SSO and when each applies.</li>
       <li>I can drain a leaf with maintenance mode, verify the drain from a spine, and bring it back.</li>
       <li>I can install an extension persistently and clean it up again.</li>
