@@ -27,3 +27,4 @@ Study guides and labs in this repo link to these chapters by name.
 | 44 | The EOS Extension System | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/44%5B%3Bvnd.vst.idref%3Dchapter-idm45591788960200%5D!/4/2/2%5Bthe_eos_extension_system%5D) |
 | 46 | Multiple Spanning Tree Protocol | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/46%5B%3Bvnd.vst.idref%3Dchapter-idm45591788964376%5D!/4/2/2%5Bmultiple_spanning_tree_protocol%5D) |
 | 48 | MLAG | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/48%5B%3Bvnd.vst.idref%3Dchapter-idm45591788536296%5D!/4/2/2%5Bmlag%5D) |
+| 50 | First-Hop Redundancy | [Open](https://bookshelf.vitalsource.com/books/9781491952993/epubcfi/6/50%5B%3Bvnd.vst.idref%3Dchapter-idm45591788535880%5D!/4/2/2%5Bfirst-hop_redundancy%5D) |
