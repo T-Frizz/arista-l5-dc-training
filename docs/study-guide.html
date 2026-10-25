@@ -433,7 +433,7 @@ show interfaces counters rates  ! uplink balance</pre></div>
   <article class="obj" id="obj-1-1" data-dom="1">
     <header><span class="oid">1.1</span><h3>EOS foundations: SysDB, the CLI, and safe config change</h3><label class="conf"><input type="checkbox" id="c-1-1"> I can do this</label></header>
     <div class="body">
-      <p class="note">One unit covering Arista Warrior ch. 7 (SysDB), ch. 8 (Introduction to EOS) and ch. 9 (Configuration Management). Read it in that order: how EOS keeps state, how you drive it from the CLI, and how you change it safely. Book pages are cited; extra detail comes from current EOS docs.</p>
+      <p class="note">One unit covering Arista Warrior ch. 7 (SysDB), ch. 8 (Introduction to EOS) ch. 9 (Configuration Management) and ch. 12 (Bash). Read it in that order: how EOS keeps state, how you drive it from the CLI, how you change it safely, and the Linux underneath. Book pages are cited; extra detail comes from current EOS docs.</p>
       <div class="cols">
         <div class="part"><h4>Know</h4><ul>
           <li><b>SysDB</b> is the in-memory database at the center of EOS. Every feature runs as its own Linux process (an <b>agent</b>: Stp, Bgp, Lldp, ConfigAgent…) in protected memory, and agents never talk to each other directly: they publish state to SysDB and subscribe to what they need. <span class="pg">AW 7 p.35</span></li>
@@ -602,6 +602,50 @@ aaa authorization exec default group TAC local
 aaa accounting commands all default start-stop group TAC
 show aaa · show users · show tacacs</pre></div>
       </div>
+      <div class="cols">
+        <div class="part"><h4>Bash on EOS (ch. 12)</h4><ul>
+          <li>The switch is a real Linux server, not an emulation. <code>bash</code> from enable mode drops you into a shell as your EOS user (not root) in <code>/home/&lt;user&gt;</code>; use <code>sudo</code> when you really need root. Limit who gets bash with AAA command authorization. <span class="pg">AW 12 p.55</span></li>
+          <li>Normal Linux tools work: <code>ls</code>, <code>cat</code>, <code>grep</code>, <code>vmstat</code>, <code>ps</code>, <code>top</code>, <code>ifconfig</code>/<code>ip</code>, <code>tcpdump</code>, <code>python3</code>. <span class="pg">AW 12 p.55</span></li>
+          <li><b>CLI from bash:</b> <code>Cli</code> opens an EOS CLI; <code>Cli -c "show version"</code> runs one command and prints it, so you can pipe or redirect it. Add <code>-p 15</code> for privileged commands. <code>FastCli</code> is the old name; in current EOS <code>Cli</code> is the fast one. <span class="pg">AW 12 p.55–56</span></li>
+          <li><b>Bash from the CLI:</b> <code>bash uname -a</code> runs one Linux command without leaving the CLI; it runs from your home directory, so give full paths. <span class="pg">AW 12 p.56</span></li>
+          <li><b>What survives a reboot:</b> only <code>/mnt/flash</code> (<code>flash:</code>), <code>/mnt/usb1</code>, <code>/mnt/drive</code> (SSD, <code>drive:</code>, which also holds log archives) and <code>/persist</code> (→ <code>/mnt/flash/persist</code>). Your home directory, <code>/tmp</code> and package installs are gone. Keep scripts on flash. <span class="pg">AW 12 p.56</span></li>
+          <li><b>Look around:</b> <code>/etc/Eos-release</code> for the version (handy in scripts); <code>pstree</code> shows ProcMgr and every agent under it; <code>ifconfig -s</code> shows kernel names: <code>et1</code> = Ethernet1, plus <code>cpu</code>, <code>mirrorN</code> (monitor sessions), <code>vxlan</code>, <code>txfwd</code>/<code>txraw</code>. <span class="pg">AW 12 p.56–57</span></li>
+          <li><b>VRFs are Linux network namespaces</b> (<code>ns-MGMT</code>). From bash, <code>sudo ip netns exec ns-MGMT ping 10.0.0.5</code>; from the CLI, <code>cli vrf MGMT</code> then <code>bash</code> puts your shell in that VRF. Without it, scripts use the default VRF and can't reach the management network.</li>
+          <li><b>Packet capture:</b> <code>tcpdump -i et1</code> (or <code>tcpdump interface Ethernet1</code> from the CLI) sees only traffic to and from the CPU: control plane, punted and mirrored packets, not forwarded traffic. Write to flash with a size cap.</li>
+          <li><b>Scheduling:</b> prefer the EOS <code>schedule</code> command (in the config, survives reboots, logs to flash) over cron, whose crontab lives outside flash. For event-driven scripts use <code>event-handler</code> (3.1). For structured data, call eAPI over the local Unix socket instead of scraping <code>Cli -c</code> text (7.3).</li>
+        </ul></div>
+        <div class="part"><h4>Commands and one-liners</h4>
+<pre>bash                                 <span class="c">! enter the shell</span>
+bash cat /etc/Eos-release            <span class="c">! one command, no shell</span>
+
+<span class="c"># inside bash</span>
+Cli -p 15 -c "show version" | grep image
+Cli -p 15 -c "show run" &gt; /mnt/flash/run-$(date +%F-%H%M).cfg
+pstree -p | grep -E "ProcMgr|Bgp|Stp"
+ps aux --sort=-%cpu | head
+ifconfig -s                          <span class="c"># et1 = Ethernet1</span>
+sudo tcpdump -i et1 -c 50 -nn not port 22
+sudo tcpdump -i et1 -w /mnt/flash/cap.pcap -C 10 -W 2
+sudo ip netns list
+sudo ip netns exec ns-MGMT ping -c 3 10.0.0.5
+df -h /mnt/flash                     <span class="c"># flash space</span>
+
+<span class="c"># bits/s on Et1 over 10 s</span>
+c(){ Cli -c "show int Et1 | json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["interfaces"]["Ethernet1"]["interfaceCounters"]["inOctets"])'; }
+a=$(c); sleep 10; b=$(c); echo $(( (b-a)*8/10 )) bps
+
+<span class="c">! EOS scheduler instead of cron</span>
+schedule cfg-backup interval 60 max-log-files 48 command show running-config
+<span class="c">! own script, kept on flash</span>
+schedule check interval 15 max-log-files 4 command bash python3 /mnt/flash/check.py</pre></div>
+      </div>
+      <div class="part traps"><h4>Bash cautions</h4><ul>
+        <li>Anything you write outside flash, USB, drive or <code>/persist</code> vanishes at reboot, including scripts in your home directory and files from <code>&gt; file</code> without a full path. <span class="pg">AW 12 p.56</span></li>
+        <li>Don't work as root (<code>sudo -i</code>) unless you must; one wrong <code>rm</code> or <code>kill</code> hits SysDB and the agents (see the SysDB notes above).</li>
+        <li>Give bash only to people who need it: <code>aaa authorization commands</code> through TACACS+ can deny the <code>bash</code> command, and command accounting logs it.</li>
+        <li>Shell commands and Linux-side changes aren't part of running-config. A switch fixed "in bash" isn't documented anywhere and won't survive a reboot or a CloudVision reconcile.</li>
+        <li><code>tcpdump</code> on a front-panel port won't show transit traffic. Use a monitor session to mirror it to the CPU or another port (3.3).</li>
+      </ul></div>
       <div class="book-notes">
         <div class="part"><h4>Arista Warrior ch. 7, SysDB: notes by page</h4><ul>
           <li><b>p.35</b> Monolithic OS code grows for years in one block; any crash takes the whole switch down. Linux-style process separation fixes that, but on its own a restarted process (say STP) still starts blind and the network reconverges. EOS adds SysDB so a restarted agent finds its old state and reuses it. Demo setup: two switches, one root, one port discarding.</li>
@@ -626,6 +670,12 @@ show aaa · show users · show tacacs</pre></div>
           <li><b>p.47</b> Sessions: <code>configure session NAME</code>, make changes, exit; running-config is unchanged and <code>show configuration sessions</code> lists it as pending. <code>show session-config named NAME</code> shows a whole configuration, because a session is a copy of running-config with your changes applied.</li>
           <li><b>p.48</b> <code>show session-config named NAME diff</code> compares it with running-config. A change made to running-config after the session was created shows as a removal, and committing the session removes it. <code>commit timer</code> commits for a set time; when the timer runs out without a final commit, EOS reverts to the checkpoint it took automatically. The author once cut off a whole country with an empty ACL and learned <code>reload in</code>; the commit timer is better because nothing reboots. Sessions aren't saved to flash.</li>
           <li><b>p.49</b> <code>rollback clean-config</code> in a session gives an all-defaults config, like <code>write erase</code> plus reload, and is part of how CloudVision configures switches. Session limits default to 5 pending and 1 completed (settable 1–20 and 0–20). Sessions are uncompressed in memory, so don't raise the limits without need. If you want a merge, use <code>copy</code>.</li>
+        </ul></div>
+        <div class="part"><h4>Arista Warrior ch. 12, Bash: notes by page</h4><ul>
+          <li><b>p.55</b> Arista switches are Linux servers built to be switches. <code>bash</code> from enable gives a normal, non-root shell in your home directory (AAA can restrict it). Navigation, <code>ls -alh</code>, <code>ifconfig -a</code> (cpu, cpudebug, et1…) and <code>vmstat</code> all work because it really is Linux. <code>Cli</code> opens the EOS CLI from bash; <code>Cli --help</code> lists options; <code>Cli -c "sho ver"</code> runs a command and returns to bash, so its output can go through <code>grep</code>.</li>
+          <li><b>p.56</b> Old editions used <code>FastCli</code> (it asked an agent instead of starting a new process); now <code>Cli</code> points to it and is just as fast. Redirect output to a file and <code>cat</code> it. Files in your home directory don't survive a reboot: only <code>/mnt/flash</code>, <code>/mnt/usb1</code>, <code>/mnt/drive</code> and <code>/persist</code> (a link to <code>/mnt/flash/persist</code>) do. <code>bash &lt;command&gt;</code> from the CLI runs a single Linux command (<code>bash uname -a</code>, <code>bash pwd</code> shows the home directory).</li>
+          <li><b>p.56</b> Tips: flash is <code>/mnt/flash</code>; the SSD is <code>drive:</code> at <code>/mnt/drive</code>, holding dated <code>var_archive</code> folders of old logs. <code>/etc/Eos-release</code> holds the version. <code>pstree</code> shows systemd, ProcMgr master and worker, and the agents (Aaa, ConfigAgent, Fru, IgmpSnooping, Rib, Sand, StageMgr, Sysdb, XcvrAgent…), plus many <code>netns</code> processes.</li>
+          <li><b>p.57</b> <code>ifconfig -s</code> lists kernel interfaces: cpu, cpudebug, et1–etN, mirror4–15, txfwd, txraw, vxlan. Learning Linux is the author's top recommendation for anyone going deep on Arista.</li>
         </ul></div>
       </div>
       <div class="refs"><span class="lbl">Read</span><span data-ch="7"></span><span data-ch="8"></span><span data-ch="9"></span><a class="chip" href="https://www.arista.com/en/um-eos" target="_blank" rel="noopener"><b>EOS</b>User Manual</a><a class="chip lab" data-lab="obj-1-1" href="#"><b>LAB</b>D1</a></div>
